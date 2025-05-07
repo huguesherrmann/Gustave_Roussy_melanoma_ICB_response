@@ -1,0 +1,147 @@
+"""
+@modified: 07/10/22
+@main_dev: Hugues Herrmann
+Sample reads, pseudo-align them with Kallisto and aggregate transcripts count to genes.
+"""
+
+shell.executable('bash')
+
+
+### ========== Variables ========== ###
+# Config variables
+SAMPLE_ID = config["sample_ID"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+FASTQ_DIR = config["fastq_dir"]
+N_SAMPLE_LIST = config["n_sample"]
+COHORT = config["cohort"]
+ANNOTATION = config["annotation"]
+OUT_DIR = config["out_dir"]
+SEED = config["seed"] if "seed" in config else 1234
+KALLISTO_INDEX = config["kallisto_index"]
+KALLISTO_THREADS = config["kallisto_threads"] if "kallisto_threads" in config else 2
+TX2GENE = config["tx2gene"]
+
+TYPE = config["type"] if "type" in config else "pair_end"
+LENGTH = config["length"] if "length" in config else 100 # Only for single-end, no impact if pair-end mode
+SD = config["sd"] if "sd" in config else 10 # Only for single-end, sqrt(read length), no impact if pair-end mode
+
+
+# Intern variables
+LOG_DIR = OUT_DIR + "logs/"
+SAMPLED_READS_DIR = OUT_DIR + "sampled_reads/"
+KALLISTO_QUANT_DIR = OUT_DIR + "kallisto_quant/"
+TXIMPORT_DIR = OUT_DIR + "tximport/"
+
+RULE_SAMPLE_READS_OUT = []
+for n_sample in N_SAMPLE_LIST:
+    for sample in SAMPLE_ID:
+        RULE_SAMPLE_READS_OUT.append(SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R1.fastq.gz")
+        RULE_SAMPLE_READS_OUT.append(SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R2.fastq.gz")
+
+RULE_KALLISTO_QUANT_OUT = []
+for n_sample in N_SAMPLE_LIST:
+    for sample in SAMPLE_ID:
+        RULE_KALLISTO_QUANT_OUT.append(KALLISTO_QUANT_DIR + "sample_" + str(n_sample) + "/" + sample + "/abundance.tsv")
+
+RULE_TXIMPORT_OUT = []
+for n_sample in N_SAMPLE_LIST:
+    RULE_TXIMPORT_OUT.append(TXIMPORT_DIR + "sample_" + str(n_sample) + "/gene_counts.tsv")
+
+# Software
+SEQTK = "/mnt/beegfs/userdata/h_herrmann/.environment_conda/seqtk/bin/seqtk"
+KALLISTO = "/mnt/beegfs/userdata/h_herrmann/.environment_conda/kallisto_tximport/bin/kallisto"
+#RSCRIPT = "/mnt/beegfs/software/R/4.1.1/bin/Rscript"
+TXIMPORT_SCRIPT = "/mnt/beegfs/userdata/h_herrmann/scripts/kallisto_tximport/tximport.R"
+
+
+
+### ========== Rules ========== ###
+rule all :
+    input : 
+        expressed_genes_per_sampling = OUT_DIR + "tximport/expressed_genes_per_sampling.tsv"
+
+
+# The rule is not robust for single-end, could be great to fix it
+rule sample_reads:
+    input:
+        r1 = expand("{path}{sample_ID}{r1_suffix}", path = FASTQ_DIR, sample_ID = SAMPLE_ID, r1_suffix = R1_SUFFIX),
+        r2 = expand("{path}{sample_ID}{r2_suffix}", path = FASTQ_DIR, sample_ID = SAMPLE_ID, r2_suffix = R2_SUFFIX)
+    output:
+        sampled = RULE_SAMPLE_READS_OUT
+    params:
+        seed = SEED
+    run:
+        for n_sample in N_SAMPLE_LIST:
+            for sample in SAMPLE_ID:
+                shell("{seqtk} sample -s {seed} {r1} {n_sample} > {r1_sampled}".format(seqtk = SEQTK, seed = params.seed, r1 = FASTQ_DIR + sample + R1_SUFFIX, n_sample = n_sample, r1_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R1.fastq"))
+                shell("{seqtk} sample -s {seed} {r2} {n_sample} > {r2_sampled}".format(seqtk = SEQTK, seed = params.seed, r2 = FASTQ_DIR + sample + R1_SUFFIX, n_sample = n_sample, r2_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R2.fastq"))
+                shell("gzip -1 {r1_sampled}".format(r1_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R1.fastq"))
+                shell("gzip -1 {r2_sampled}".format(r2_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R2.fastq"))
+
+rule kallisto_quant:
+    input: 
+        sampled = RULE_SAMPLE_READS_OUT,
+        kallisto_index = KALLISTO_INDEX
+    output:
+        abundance_tsv = RULE_KALLISTO_QUANT_OUT
+    params:
+        kallisto_threads = KALLISTO_THREADS,
+        length = LENGTH, # Only for single-end, no impact if pair-end mode
+        sd = SD # Only for single-end, no impact if pair-end mode
+    threads: 
+        KALLISTO_THREADS
+    run:
+        for n_sample in N_SAMPLE_LIST:
+            for sample in SAMPLE_ID:
+                if TYPE == "pair_end":
+                    shell("{kallisto} quant -i {kallisto_index} \
+                    -o {out_dir} \
+                    -t {kallisto_threads} \
+                    {r1_sampled} {r2_sampled}".format(kallisto = KALLISTO, kallisto_index = input.kallisto_index, out_dir = KALLISTO_QUANT_DIR + "sample_" + str(n_sample) + "/" + sample + "/", kallisto_threads = threads, r1_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R1.fastq.gz", r2_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R2.fastq.gz"))
+                else:
+                    shell("{kallisto} quant -i {kallisto_index} \
+                    -o {out_dir} \
+                    -t {kallisto_threads} \
+                    --single \
+                    -l {length} \
+                    -s {sd} \
+                    {r1_sampled}".format(kallisto = KALLISTO, kallisto_index = input.kallisto_index, out_dir = KALLISTO_QUANT_DIR + "sample_" + str(n_sample) + "/" + sample + "/", kallisto_threads = threads, r1_sampled = SAMPLED_READS_DIR + "sample_" + str(n_sample) + "/" + "sampled_" + sample + "_R1.fastq.gz", length = params.length, sd = params.sd))
+
+
+rule tximport:
+    input:
+        abundance_tsv = RULE_KALLISTO_QUANT_OUT,
+        tx2gene = TX2GENE
+    output:
+        gene_counts = RULE_TXIMPORT_OUT
+    params:
+        tx2gene = TX2GENE,
+        tximport_script = TXIMPORT_SCRIPT
+    log:
+        LOG_DIR + "rule_tximport.log"
+    run:
+        for n_sample in N_SAMPLE_LIST:
+            shell("Rscript {tximport_script} {tx2gene} {abundance_tsv_dir} 2>> {log}".format(tximport_script = params.tximport_script, tx2gene = params.tx2gene, abundance_tsv_dir = KALLISTO_QUANT_DIR + "sample_" + str(n_sample) + "/", log = log))
+            shell("mv {gene_counts} {tximport_dir}".format(gene_counts = KALLISTO_QUANT_DIR + "sample_" + str(n_sample) + "/gene_counts.tsv", tximport_dir = TXIMPORT_DIR + "sample_" + str(n_sample) + "/"))
+
+
+rule get_expressed_genes_per_sampling:
+    input:
+        gene_counts = RULE_TXIMPORT_OUT,
+        annotation = ANNOTATION
+    output:
+        expressed_genes_per_sampling = OUT_DIR + "tximport/expressed_genes_per_sampling.tsv"
+    params:
+        tximport_dir = OUT_DIR + "tximport/",
+        cohort = COHORT,
+        out_dir = OUT_DIR,
+        kallisto_dir = KALLISTO_QUANT_DIR,
+        sample_dir = SAMPLED_READS_DIR
+    run:
+        shell("Rscript scripts/01_get_expressed_genes_per_sampling.R --tximport_dir {params.tximport_dir} \
+        --annotation {input.annotation} \
+        --cohort {params.cohort} \
+        --out_dir {params.out_dir}")
+        #shell("rm -r {params.kallisto_dir}")
+        shell("rm -r {params.sample_dir}")

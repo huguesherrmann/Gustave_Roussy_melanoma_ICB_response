@@ -1,0 +1,13 @@
+{
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/hossain/",
+  "star_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/STAR_index_hg38v24",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_alignment_metrics/hossain/",
+  "threads": 6,
+  "r1_suffix": "_1.fastq.gz",
+  "r2_suffix": "_1.fastq.gz",
+  "sample_ID": ["SRR21531009", "SRR21531010", "SRR21531011", "SRR21531012", "SRR21531013", "SRR21531014",
+"SRR21531015", "SRR21531016", "SRR21531017", "SRR21531018",
+"SRR21531019", "SRR21531020", "SRR21531021", "SRR21531022",
+"SRR21531023", "SRR21531024", "SRR21531025", "SRR21531026",
+"SRR21531027", "SRR21531028"]
+}

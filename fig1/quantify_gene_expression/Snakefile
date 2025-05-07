@@ -1,0 +1,67 @@
+"""
+@modified: 09/12/21
+@main_dev: Hugues Herrmann
+Generate gene count with kallisto + tximport.
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+WORK_DIR = config["work_dir"]
+OUTPUT_DIR = config["output_dir"]
+FASTQ_DIR = config["fastq_dir"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+SAMPLE_ID = config["sample_ID"]
+KALLISTO_INDEX = config["kallisto_index"]
+TX2GENE = config["tx2gene"]
+COHORT = config["cohort"]
+
+# Optional
+KALLISTO_THREADS = config["kallisto_threads"] if "kallisto_threads" in config else 1
+
+# Software
+KALLISTO = "/mnt/beegfs/userdata/h_herrmann/.environment_conda/kallisto_tximport/bin/kallisto"
+
+
+### ========== Rules ========== ###
+rule all:
+    input: 
+        gene_counts = OUTPUT_DIR + "gene_counts_" + COHORT + ".tsv",
+        scaled_tpm_gene_counts = OUTPUT_DIR + "scaled_tpm_gene_counts_" + COHORT + ".tsv"
+
+
+rule kallisto_quant:
+    input: 
+        r1 = FASTQ_DIR + "{sample_ID}" + R1_SUFFIX,
+        r2 = FASTQ_DIR + "{sample_ID}" + R2_SUFFIX,
+        kallisto_index = KALLISTO_INDEX
+    output:
+        abundance_h5 = WORK_DIR + "{sample_ID}/abundance.h5",
+        abundance_tsv = WORK_DIR + "{sample_ID}/abundance.tsv",
+        run_info = WORK_DIR + "{sample_ID}/run_info.json"
+    params:
+        kallisto = KALLISTO,
+        output_dir = WORK_DIR + "{sample_ID}",
+        kallisto_threads = KALLISTO_THREADS
+    threads: KALLISTO_THREADS
+    run:
+        shell("{params.kallisto} quant -i {input.kallisto_index} -o {params.output_dir} -t {params.kallisto_threads} {input.r1} {input.r2}")
+
+rule tximport:
+    input:
+        abundance_tsv = expand(WORK_DIR + "{sample_ID}/abundance.tsv", sample_ID = config["sample_ID"]),
+        tx2gene = TX2GENE
+    output:
+        gene_counts = OUTPUT_DIR + "gene_counts_" + COHORT + ".tsv",
+        scaled_tpm_gene_counts = OUTPUT_DIR + "scaled_tpm_gene_counts_" + COHORT + ".tsv"
+    params:
+        tx2gene = TX2GENE,
+        abundance_dir = WORK_DIR,
+        out_dir = OUTPUT_DIR,
+        cohort = COHORT
+    run:
+        shell("Rscript scripts/tximport.R --tx2gene {params.tx2gene} \
+              --abundance_dir {params.abundance_dir} \
+              --out_dir {params.out_dir} \
+              --cohort {params.cohort}")
+

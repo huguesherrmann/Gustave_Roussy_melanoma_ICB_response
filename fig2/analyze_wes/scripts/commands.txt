@@ -1,0 +1,2 @@
+# Se mettre dans le directory ou il y a tous les dossiers des fastq puis
+for i in *; do cat ${i}/${i}*_1.fq.gz > ./${i}_1.fastq.gz; cat ${i}/${i}*_2.fq.gz > ./${i}_2.fastq.gz; done

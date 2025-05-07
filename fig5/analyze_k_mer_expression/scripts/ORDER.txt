@@ -1,0 +1,10 @@
+01_prepare_intergenic_contig_table_to_infer_orientation.R
+02_get_intergenic_strand_counts.sh
+03_infer_orientation.R
+04_filter_out_non_intergenicregions.R
+05_perform_functional_enrichment.R
+06_get_inergenic_and_ALR_burdens.R
+07_get_intergenic_and_ALR_annotations_and_sequences.R
+08_label_patient_as_intergenic_and_ALR.R
+09_plot_correlations.R
+10_survival.R

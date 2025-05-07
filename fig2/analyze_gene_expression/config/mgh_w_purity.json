@@ -1,0 +1,14 @@
+{
+  "counts": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/mgh/gene_counts_mgh.tsv",
+  "tpm": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/mgh/scaled_tpm_gene_counts_mgh.tsv",
+  "design": "/mnt/beegfs/userdata/h_herrmann/design/mgh/baseline_curated_design_mgh.tsv",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/results_and_data/gene_level_analysis/annot_lookup.tsv",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/mgh_w_purity/",
+  "cohort": "mgh",
+  "mart": "/mnt/beegfs/userdata/h_herrmann/tools_software/R_mart_hsapiens_gene_ensembl/R_mart_hsapiens_gene_ensembl.rds",
+  "log2FC": 0,
+  "alpha_deg": 0.05,
+  "alpha_gsea": 0.05,
+  "tumor_purity": "TRUE"
+}
+

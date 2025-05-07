@@ -1,0 +1,13 @@
+{
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_gene_detection/test/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/gr1234/",
+  "r1_suffix": "_trimmed.R1.fastq.gz",
+  "r2_suffix": "_trimmed.R2.fastq.gz",
+  "cohort": "test",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/results_and_data/gene_level_analysis/annot_lookup.tsv",
+  "n_sample": [1000, 5000],
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "kallisto_threads": 4,
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "sample_ID": ["D821T53", "D437T73"],
+}

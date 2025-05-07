@@ -1,0 +1,16 @@
+{
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_gene_detection/mgh/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/mgh/",
+  "r1_suffix": "_1.fastq.gz",
+  "r2_suffix": "_2.fastq.gz",
+  "cohort": "MGH",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/results_and_data/gene_level_analysis/annot_lookup.tsv",
+  "n_sample": [1000000, 5000000, 10000000, 20000000],
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "kallisto_threads": 3,
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "sample_ID": ["SRR7344544", "SRR7344546", "SRR7344548", "SRR7344550", "SRR7344552", "SRR7344554", 
+"SRR7344556", "SRR7344559", "SRR7344561", "SRR7344564", "SRR7344565", "SRR7344567", 
+"SRR7344574", "SRR7344575", "SRR13853353", "SRR13853355", "SRR13853358", "SRR13853359",
+"SRR13853366", "SRR13853368", "SRR13853370", "SRR13853372", "SRR13853375", "SRR13853377"],
+}

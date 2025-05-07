@@ -1,0 +1,12 @@
+{
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/hugo/",
+  "star_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/STAR_index_hg38v24",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_alignment_metrics/hugo/",
+  "threads": 6,
+  "r1_suffix": "_1.fastq.gz",
+  "r2_suffix": "_2.fastq.gz",
+  "sample_ID": ["SRR3184279", "SRR3184280", "SRR3184281", "SRR3184282", "SRR3184283", "SRR3184284", "SRR3184285", "SRR3184286",
+"SRR3184287", "SRR3184288", "SRR3184289", "SRR3184290", "SRR3184291", "SRR3184292", "SRR3184293", "SRR3184294",
+"SRR3184295", "SRR3184296", "SRR3184297", "SRR3184298", "SRR3184299", "SRR3184300", "SRR3184301", "SRR3184302",
+"SRR3184303", "SRR3184304", "SRR3184305", "SRR3184306"]
+}

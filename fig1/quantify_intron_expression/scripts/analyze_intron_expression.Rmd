@@ -1,0 +1,971 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r include=FALSE}
+library(circlize)
+library(ComplexHeatmap)
+library(ggpubr)
+library(DESeq2)
+library(tidyverse)
+
+`%ni%` <- Negate(`%in%`)
+
+scale_na_rm <- function(x, ...) {
+   (x - min(x, ...)) / (max(x, ...) - min(x, ...))
+}
+```
+
+```{r include=FALSE}
+ambiguous_counts <- read.table("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/ambiguous_counts/ambiguous_counts.tsv", sep = "\t")
+mature_counts <- read.table("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/mature_counts/mature_counts.tsv", sep = "\t")
+nascent_counts <- read.table("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/nascent_counts/nascent_counts.tsv", sep = "\t")
+
+annotation <- read_tsv("/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/ensembl_hg38v108_gene_annotation_table.tsv", show_col_types = FALSE)
+pcg <- annotation %>% filter(Class == "protein_coding")
+non_coding <- annotation %>% filter(Class != "protein_coding")
+
+design <- read_tsv("/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv", show_col_types = FALSE) %>%
+   mutate(Response = if_else(Response == "responder", "R", "NR"))
+```
+## Description globale
+
+https://github.com/pachterlab/kallisto-transcriptome-indices
+
+```{r}
+all(colnames(ambiguous_counts) == colnames(ambiguous_counts))
+all(rownames(mature_counts) == rownames(nascent_counts))
+all(colnames(mature_counts) == colnames(nascent_counts))
+
+sum(as.matrix(ambiguous_counts))
+sum(as.matrix(mature_counts))
+sum(as.matrix(nascent_counts))
+sum(as.matrix(mature_counts)) / sum(as.matrix(nascent_counts))
+```
+Les matrices sont dans le même ordre et peuvent être manipulées directement (addition, division, etc)
+La matrice des nascents est ~1.73 fois plus grande la matrice des matures
+Etonnament la matrice des ambiguous n'est pas la plus grosse. Ca souligne le nombre important de reads dans les introns
+
+On définit la proportion d'intron => bornée [0; 1] plutôt que le ratio qui est définit sur R 
+De plus, on s'affranchit des 0 dans l'une des 2 catégories
+Proportion ~ 0 => bcp de matures par rapport aux nascents
+Proportion ~ 1 => bcp de nascents par rapport aux matures
+```{r}
+depth <- list(unambiguous = as.matrix(nascent_counts + mature_counts),
+              conservative = as.matrix(nascent_counts + mature_counts + ambiguous_counts))
+intron_prop <- list(unambiguous = as.matrix(nascent_counts / depth$unambiguous),
+                    conservative = as.matrix(nascent_counts / depth$conservative))
+
+hist(intron_prop$unambiguous, main = "Unambiguous intron proportion")
+hist(intron_prop$conservative, main = "Conservative intron proportion")
+```
+Gros excès de nascents globalement. Un élement d'explication est la plus grande taille des régions introniques 
+
+```{r}
+sum_threshold <- 500
+depth$filtered_unambiguous <- depth$unambiguous[rowSums(depth$unambiguous) > sum_threshold, ]
+
+dim(depth$filtered_unambiguous)
+
+intron_prop$filtered_unambiguous <- as.matrix(nascent_counts[rowSums(depth$unambiguous) > sum_threshold, ] / depth$filtered_unambiguous)
+hist(intron_prop$filtered_unambiguous, main = "Filtered unambiguous intron proportion")
+```
+Conservation des lignes (gènes) avec un compte d'au moins 500 à travers les 145 samples. ~10 000 gènes sont exclus
+Un compte de 500 revient a une expression d'environ 3.5 dans chaque sample
+Tjs bcp de nascents par rapport aux matures. Bcp de gènes sont composés que de quelques introns (nascents)
+
+## Comparaison des proportions moyennes d'introns (tous les gènes)
+```{r}
+col_mean <- data.frame(Mean = colMeans(intron_prop$filtered_unambiguous, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Filtered unambiguous\nintron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% pcg$Geneid) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "PCG filtered unambiguous\nintron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% non_coding$Geneid) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Non-coding filtered unambiguous\nintron proportion", x = "")
+```
+Pas de diff de proportions moyennes d'introns (dans le cas unambiguous) globalement, ni lorsqu'on stratifie par PCG et non-codant
+
+## Comparaison des proportions moyennes d'introns (PCG diff exprimés)
+```{r}
+de_pcg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/coding_deg.tsv", show_col_types = FALSE)
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_pcg$ensembl_gene_id) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "DE PCG filtered unambiguous\nintron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% (de_pcg %>% filter(Expression == "responder") %>% pull(ensembl_gene_id))) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder DE PCG filtered unambiguous\nintron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% (de_pcg %>% filter(Expression == "non_responder") %>% pull(ensembl_gene_id))) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Non-responder DE PCG filtered unambiguous\nintron proportion", x = "")
+```
+Pas de diff de proportions moyennes d'introns (dans le cas unambiguous) chez les PCG, ni lorsqu'on stratifie par les PCG exprimés par les repondeurs et les non-repondeurs
+
+## Comparaison des proportions moyennes d'introns (non-codant diff exprimés)
+```{r}
+de_non_coding <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE)
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_non_coding$ensembl_gene_id) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "DE non-coding filtered\nunambiguous intron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% (de_non_coding %>% filter(Expression == "responder") %>% pull(ensembl_gene_id))) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder DE non-coding filtered\nunambiguous intron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% (de_non_coding %>% filter(Expression == "non_responder") %>% pull(ensembl_gene_id))) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Non-responder DE non-coding filtered\nunambiguous intron proportion", x = "")
+```
+Parmi l'ensemble des gènes non-codants diff exprimés, il y a un excès d'introns par rapport aux exons chez les NR. Cet effet est retoruvé lorsqu'on stratifie par les gènes non-codants exprimés par les répondeurs, mais par lorsqu'on stratifie par les gènes des non-répondeurs
+
+```{r}
+de_ig <- de_non_coding %>% filter(Expression == "responder") %>%
+   filter(grepl("IGK|IGH|IGL", hgnc_symbol))
+de_without_ig <- de_non_coding %>% filter(Expression == "responder") %>%
+   filter(!grepl("IGK|IGH|IGL", hgnc_symbol))
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_ig$ensembl_gene_id) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder DE IG genes filtered\nunambiguous intron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_without_ig$ensembl_gene_id) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder non-coding DE genes\nwithout IG genes filtered\nunambiguous intron proportion", x = "")
+```
+Pas d'excès d'introns lorsqu'on stratifie pour les gènes d'IG
+Mais excès lorsqu'on prend les gènes non-codants DE up chez les répondeurs. Toute petite pvalue pour une différence pas si importante
+
+Il y a 979 non-coding genes DE up chez les répondeurs, 156 sont des IG et 823 ne sont pas des IG. Parmi ces 823, seuls 293 sont retrouvés dans l'index nascents/matures
+```{r}
+as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("ensembl_gene_id") %>%
+   filter(ensembl_gene_id %in% de_without_ig$ensembl_gene_id) %>%
+   inner_join(de_non_coding, ., by = "ensembl_gene_id") %>%
+   pull(hgnc_symbol)
+```
+A noter que IFNG-AS1 est up chez les répondeurs. Il s'agit bien de l'AS d'IFNG, qui agit en régulateur positif de l'expression d'IFNG
+Stein N, Berhani O, Schmiedel D, Duev-Cohen A, Seidel E, Kol I, et al. (January 2019). "IFNG-AS1 Enhances Interferon Gamma Production in Human Natural Killer Cells". iScience. 11: 466–473. Bibcode:2019iSci...11..466S. doi:10.1016/j.isci.2018.12.034. PMC 6354656. PMID 30661002
+
+```{r}
+de_annotation <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("ensembl_gene_id") %>%
+   filter(ensembl_gene_id %in% de_without_ig$ensembl_gene_id) %>%
+   inner_join(de_non_coding, ., by = "ensembl_gene_id") %>%
+   inner_join(annotation, ., by = c("Geneid" = "ensembl_gene_id")) %>%
+   mutate(Antisens = grepl("-AS", hgnc_symbol))
+table(de_annotation$Class, useNA = "always")
+table(de_annotation$Class, de_annotation$Antisens, deparse.level = 2, useNA = "always")
+```
+TR correspond à T cell receptor
+Environ 40% des lncRNA sont des antisens 
+
+```{r}
+de_tcr <- de_non_coding %>% filter(Expression == "responder") %>%
+   filter(grepl("TRA|TRB|TRD|TRG", hgnc_symbol))
+de_without_tcr <- de_non_coding %>% filter(Expression == "responder") %>%
+   filter(!grepl("TRA|TRB|TRD|TRG", hgnc_symbol))
+de_lnc <- de_annotation %>% filter(Expression == "responder") %>%
+   filter(grepl("lncRNA", Class))
+de_na <- de_annotation %>% filter(Expression == "responder") %>%
+   filter(is.na(Class))
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_tcr$ensembl_gene_id) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder DE TCR genes filtered\nunambiguous intron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_without_tcr$ensembl_gene_id) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder non-coding DE genes\nwithout TCR genes filtered\nunambiguous intron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_lnc$Geneid) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder DE lncRNA genes filtered\nunambiguous intron proportion", x = "")
+
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_na$Geneid) %>%
+   column_to_rownames("Ensembl_gene_id")
+col_mean <- data.frame(Mean = colMeans(subset, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID")
+ggplot(col_mean, aes(Response, Mean, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+   guides(fill = "none") +
+   labs(y = "Responder DE genes without biotype filtered\nunambiguous intron proportion", x = "")
+```
+Légère tendance à l'excès d'introns chez les NR dans les gènes de TCR mais a priori la tendance vient des autres gènes
+La pvalue augmente lorsqu'on stratifie pour les gènes des TCR car les TCR ont des proportions d'introns bcp plus faibles (médianes ~ 0.25) qui
+drive les moyennes vers le bas (et comme il y a une tendance à un excès d'introns chez les NR etc)
+Pas de diff non plus si on se concentre sur les lncRNA. Non plus sur les gènes sans biotype connu
+Le biotype n'est pas la bonne stratification ? Absence de vrai signal et effet moyenne ?
+
+## Heatmap des non-codants DE
+```{r}
+subset <- as.data.frame(intron_prop$filtered_unambiguous) %>%
+   rownames_to_column("Ensembl_gene_id") %>%
+   filter(Ensembl_gene_id %in% de_without_ig$ensembl_gene_id) %>%
+   # column_to_rownames("Ensembl_gene_id") %>%
+   # t() %>%
+   # scale_na_rm(na.rm = TRUE) %>%
+   # t() %>% 
+   # as.data.frame() %>%
+   # rownames_to_column("Ensembl_gene_id") %>%
+   inner_join(de_annotation %>% select(Geneid, Class), ., by = c("Geneid" = "Ensembl_gene_id"))
+   
+
+ha <- HeatmapAnnotation(`Tumor purity` = anno_points(design$Tumor_purity, ylim = c(0, 1), axis_param = list(side = "left", at = c(0, 0.5, 1))),
+                        height = unit(4.9, "cm"), # Box size of Tumor_purity
+                        annotation_name_rot = 0, 
+                        `Biopsy site` = design$Biopsy_site_dummy,
+                        Sex = design$Sex,
+                        Age = design$Age,
+                        `Prior treatment adjuvant` = design$Prior_treatment_as_adjuvant,
+                        Treatment = design$Treatment_dummy,
+                        Response = design$Response,
+                        col = list(`Biopsy site` = c("lymph_nodes" = "chartreuse4", "skin" = "darkorange4", "other" = "burlywood2"),
+                                   #Batch = c("1" = "aquamarine2", "2" = "bisque4"),
+                                   Sex = c("female" = "purple", "male" = "grey"),
+                                   Age = colorRamp2(c(30, 60, 90), c("white", "grey", "black")),
+                                   Treatment = c("anti_PD1" = "darkturquoise", "anti_PD1_anti_CTLA4" = "darkseagreen2", "anti_CTLA4" = "brown4"),
+                                   `Prior treatment adjuvant` = c("yes" = "hotpink", "no" = "ivory2"),
+                                   Response = c("R" = "#56B4E9", "NR" = "#FF9999")),
+                        annotation_legend_param = list(Age = list(direction = "horizontal")),
+                        gp = gpar(col = "black"), # Add a border aroung each annotation
+                        gap = unit(0.90, "mm")) # Space between each annotation
+htmp <- Heatmap(subset %>% select(all_of(design$Sample_ID)),
+                #column_split = design$Response,
+                top_annotation = ha,
+                row_split = subset$Class,
+                row_title_rot = 0,
+                border = TRUE,
+                cluster_rows = TRUE,
+                show_row_dend = FALSE,
+                show_column_dend = FALSE,
+                show_column_names = FALSE,
+                show_row_names = FALSE,
+                heatmap_legend_param = list(title = "Expression", direction = "horizontal"),
+                colorRamp2(c(0, 0.5, 1), c("blue", "white", "red")))
+
+
+png("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/responder_de_non_coding_genes_without_IG_no_response_split.png", width = 1000, height = 1200)
+draw(htmp, merge_legend = TRUE, heatmap_legend_side = "bottom", annotation_legend_side = "bottom")
+dev.off()
+
+htmp <- Heatmap(subset %>% select(all_of(design$Sample_ID)),
+                column_split = design$Response,
+                top_annotation = ha,
+                row_split = subset$Class,
+                row_title_rot = 0,
+                border = TRUE,
+                cluster_rows = TRUE,
+                show_row_dend = FALSE,
+                show_column_dend = FALSE,
+                show_column_names = FALSE,
+                show_row_names = FALSE,
+                heatmap_legend_param = list(title = "Expression", direction = "horizontal"),
+                colorRamp2(c(0, 0.5, 1), c("blue", "white", "red")))
+png("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/responder_de_non_coding_genes_without_IG_with_response_split.png", width = 1000, height = 1200)
+draw(htmp, merge_legend = TRUE, heatmap_legend_side = "bottom", annotation_legend_side = "bottom")
+dev.off()
+```
+Rien , on observe probablement que du bruit
+
+```{r include=FALSE}
+suppressPackageStartupMessages(library(biomaRt))
+source("/mnt/beegfs/userdata/h_herrmann/mela_ici_response/analyze_gene_expression/scripts/functions_for_gene_expression_analysis.R")
+
+mart <- "/mnt/beegfs/userdata/h_herrmann/tools_software/R_mart_hsapiens_gene_ensembl/R_mart_hsapiens_gene_ensembl.rds"
+mart <- readRDS(mart)
+```
+
+# Expression différentielle des introns
+DESeq2 sur la matrice des nascents en ajustant pour les exons
+```{r}
+alpha <- 0.05
+l2fc <- 0
+form <- "~Response+Batch+Biopsy_site"
+form <- as.formula(form)
+contrast <- c("Response", "R", "NR")
+design <- design %>% mutate(Batch = factor(Batch))
+
+# Get size factors from mature matrix
+mature_counts <- mature_counts[, order(colnames(mature_counts))]
+design <- design[order(design$Sample_ID), ]
+dds <- DESeqDataSetFromMatrix(countData = mature_counts, 
+                             colData = design, 
+                             design = form) 
+keep <- rowSums(counts(dds)) >= 100
+dds <- dds[keep, ]
+mature_size_factors <- estimateSizeFactors(dds)$sizeFactor
+
+# DESeq2 on nascent matrix
+nascent_counts <- nascent_counts[, order(colnames(nascent_counts))]
+design <- design[order(design$Sample_ID), ]
+dds <- DESeqDataSetFromMatrix(countData = nascent_counts, 
+                             colData = design, 
+                             design = form)
+keep <- rowSums(counts(dds)) >= 100
+dds <- dds[keep, ]
+dds$sizeFactor <- mature_size_factors
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds)
+res <- results(dds, contrast = contrast, lfcThreshold = l2fc, alpha = alpha)
+res_df <- filter_DEG(res, alpha, l2fc, mart) %>% mutate(Expression = if_else(log2FoldChange < 0, "non_responder", "responder"))
+
+
+deseq <- identify_diff_expr_genes(nascent_counts, design, form, contrast, keep = 100)
+dds <- deseq$dds_object
+deseq_contrast <- deseq$contrast
+deg <- filter_DEG(deseq_contrast, alpha, l2fc, mart) %>% mutate(Expression = if_else(log2FoldChange < 0, "non_responder", "responder"))
+
+```
+
+
+Si numerateur = 0 => NaN donc ils sont remplacés par des 0
+Si denominateur = 0 => Inf donc ils sont remplacés par le compte des introns
+```{r}
+norm_matrix <- nascent_counts / mature_counts
+norm_matrix[is.na(norm_matrix)] <- 0
+norm_matrix[norm_matrix == Inf] <- nascent_counts[norm_matrix == Inf]
+n2 <- norm_matrix %>% round()
+
+
+form <- "~Response"
+form <- as.formula(form)
+contrast <- c("Response", "R", "NR")
+
+res <- identify_diff_expr_genes(n2, design, form, contrast, keep = 100)
+```
+
+
+
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+```{r}
+col_mean <- as.data.frame(colMeans(ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(ratios, na.rm = TRUE)")
+
+ggplot(col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Unspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+#t.test(col_mean$Mean_ratio ~ col_mean$Response, var.equal = FALSE)
+```
+
+### Ratios bruts
+Ratio > 1 => many unspliced, ratio < 1 => many spliced
+```{r}
+raw_ratios <- nascent_counts / mature_counts
+raw_ratios[raw_ratios == Inf] <- NA
+
+raw_col_mean <- as.data.frame(colMeans(raw_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(raw_ratios, na.rm = TRUE)")
+
+ggplot(raw_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Unspliced / spliced", x = "") +
+  guides(fill = "none")
+```
+
+## Ratio for coding genes
+```{r}
+table(rownames(mature_counts) %in% annotation$ensembl_gene_id)
+
+pcg <- annotation %>% filter(gene_biotype == "protein_coding") %>% pull(ensembl_gene_id)
+
+pcg_ratios <- ratios[pcg, ]
+hist(as.matrix(pcg_ratios))
+
+pcg_col_mean <- as.data.frame(colMeans(pcg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(pcg_ratios, na.rm = TRUE)")
+
+ggplot(pcg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "PCG - Unspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+Raw ratios
+```{r}
+pcg_raw_ratios <- raw_ratios[pcg, ]
+
+pcg_raw_col_mean <- as.data.frame(colMeans(pcg_raw_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(pcg_raw_ratios, na.rm = TRUE)")
+
+ggplot(pcg_raw_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "PCG - Unspliced / spliced", x = "") +
+  guides(fill = "none")
+```
+### All but PCG
+```{r}
+no_pcg <- annotation %>% filter(gene_biotype != "protein_coding") %>% pull(ensembl_gene_id)
+
+no_pcg_ratios <- ratios[no_pcg, ]
+hist(as.matrix(no_pcg_ratios))
+
+no_pcg_col_mean <- as.data.frame(colMeans(no_pcg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(no_pcg_ratios, na.rm = TRUE)")
+
+ggplot(no_pcg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "No PCG - Unspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+# Diff expressed genes
+```{r}
+deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/coding_deg.tsv", show_col_types = FALSE)
+
+deg_ratios <- ratios[deg$ensembl_gene_id, ]
+hist(as.matrix(deg_ratios))
+
+deg_col_mean <- as.data.frame(colMeans(deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(deg_ratios, na.rm = TRUE)")
+
+ggplot(deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "DEG - Unspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+## Non coding DEG
+```{r}
+no_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE)
+
+no_pcg_deg_ratios <- ratios[no_pcg_deg$ensembl_gene_id, ]
+hist(as.matrix(no_pcg_deg_ratios))
+
+no_pcg_deg_col_mean <- as.data.frame(colMeans(no_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(no_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(no_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "No PCG DEG - Unspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+Proportion tres bien finalement
+```{r}
+no_pcg_deg_raw_ratios <- raw_ratios[no_pcg_deg$ensembl_gene_id, ]
+
+no_pcg_deg_raw_col_mean <- as.data.frame(colMeans(no_pcg_deg_raw_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(no_pcg_deg_raw_ratios, na.rm = TRUE)")
+
+ggplot(no_pcg_deg_raw_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "No PCG DEG - Unspliced / spliced", x = "") +
+  guides(fill = "none")
+```
+
+### Responder no PCG DEG
+```{r}
+r_no_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "responder")
+
+r_no_pcg_deg_ratios <- ratios[r_no_pcg_deg$ensembl_gene_id, ]
+
+r_no_pcg_deg_col_mean <- as.data.frame(colMeans(r_no_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(r_no_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(r_no_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Responder no PCG DEG\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+
+
+
+nr_no_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "non_responder")
+
+nr_no_pcg_deg_ratios <- ratios[nr_no_pcg_deg$ensembl_gene_id, ]
+
+nr_no_pcg_deg_col_mean <- as.data.frame(colMeans(nr_no_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(nr_no_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(nr_no_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Non-responder no PCG DEG\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+```{r}
+r_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "responder")
+
+r_pcg_deg_ratios <- ratios[r_pcg_deg$ensembl_gene_id, ]
+
+r_pcg_deg_col_mean <- as.data.frame(colMeans(r_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(r_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(r_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Responder PCG DEG\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+
+
+
+nr_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "non_responder")
+
+nr_pcg_deg_ratios <- ratios[nr_pcg_deg$ensembl_gene_id, ]
+
+nr_pcg_deg_col_mean <- as.data.frame(colMeans(nr_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(nr_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(nr_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Non-responder PCG DEG\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+Ca ne vient pas des genes d'immunoglobulin
+```{r}
+r_no_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "responder") %>%
+   filter(grepl("IGK|IGH|IGL", hgnc_symbol))
+
+r_no_pcg_deg_ratios <- ratios[r_no_pcg_deg$ensembl_gene_id, ]
+
+r_no_pcg_deg_col_mean <- as.data.frame(colMeans(r_no_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(r_no_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(r_no_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Responder DE IG genes\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+
+
+r_no_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "responder") %>%
+   filter(!grepl("IGK|IGH|IGL", hgnc_symbol))
+
+r_no_pcg_deg_ratios <- ratios[r_no_pcg_deg$ensembl_gene_id, ]
+
+r_no_pcg_deg_col_mean <- as.data.frame(colMeans(r_no_pcg_deg_ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(r_no_pcg_deg_ratios, na.rm = TRUE)")
+
+ggplot(r_no_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Responder non coding without DE IG genes\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+
+```{r}
+r_no_pcg_deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/non_coding_deg.tsv", show_col_types = FALSE) %>% filter(Expression == "responder") %>%
+   filter(!grepl("IGK|IGH|IGL", hgnc_symbol))
+
+matures <- mature_counts[r_no_pcg_deg$ensembl_gene_id, ]
+nascents <- nascent_counts[r_no_pcg_deg$ensembl_gene_id, ]
+
+matures <- matures[rowSums(matures) > 1000, ]
+nascents <- nascents[rownames(matures), ]
+ratios <- nascents / (nascents + matures)
+
+r_no_pcg_deg_col_mean <- as.data.frame(colMeans(ratios, na.rm = TRUE)) %>%
+   rownames_to_column("Sample_ID") %>%
+   inner_join(., design, by = "Sample_ID") %>%
+   rename(Mean_ratio = "colMeans(ratios, na.rm = TRUE)")
+
+ggplot(r_no_pcg_deg_col_mean, aes(Response, Mean_ratio, fill = Response)) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+   theme_classic() +
+   stat_compare_means(method = "wilcox.test", label.x = 1.45, vjust = 0.2, label = "p.format", size = 6) +
+   theme(axis.text.x = element_text(size = 16, color = "black"),
+         axis.text.y = element_text(size = 16, color = "black"),
+         text = element_text(size = 16, color = "black"),
+         strip.text = element_text(size = 16, color = "black"),
+         legend.position = "bottom") +
+  labs(y = "Responder non coding without DE IG genes\nUnspliced / (unspliced + spliced)", x = "") +
+  guides(fill = "none")
+```
+

@@ -1,0 +1,22 @@
+{
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_repeated_element_detection/markovits/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/markovits/",
+  "r1_suffix": "_1_trimmed.fq.gz",
+  "r2_suffix": "_2_trimmed.fq.gz",
+
+  "n_read_sampled": [1000000, 5000000, 10000000, 20000000],
+  "threads": 6,
+
+  "salmon_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/REdiscoverTE_index",
+  "rediscoverte_annotation" : "/mnt/beegfs/userdata/h_herrmann/tools_software/REdiscoverTE/original/REdiscoverTE/rollup_annotation/",
+
+  "sample_ID": ["SRR12964662", "SRR12964663", "SRR12964664", "SRR12964665", 
+"SRR12964666", "SRR12964667", "SRR12964668", "SRR12964669", 
+"SRR12964670", "SRR12964671", "SRR12964672", "SRR12964673", 
+"SRR12964674", "SRR12964675", "SRR12964676", "SRR12964677", 
+"SRR12964678", "SRR12964679", "SRR12964680", "SRR12964681", 
+"SRR12964682", "SRR12964683", "SRR12964684", "SRR12964685", 
+"SRR12964686", "SRR12964687", "SRR12964688", "SRR12964689", 
+"SRR12964690", "SRR12964691", "SRR12964692", "SRR12964693", 
+"SRR12964694", "SRR12964695", "SRR12964696", "SRR12964697"]
+}

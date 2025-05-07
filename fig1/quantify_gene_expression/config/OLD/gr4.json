@@ -1,0 +1,19 @@
+{
+  "work_dir": "/mnt/beegfs/scratch/h_herrmann/kallisto/gr4/",
+  "output_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/gr4/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/gr4/",
+  "cohort": "gr4",
+  "r1_suffix": "_trimmed.R1.fastq.gz",
+  "r2_suffix": "_trimmed.R2.fastq.gz",
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "kallisto_threads": 4,
+  "sample_ID": ["D1763T06", "D1763T04", "D1763T25", "D1763T15", "D1763T56", "D1763T18", "D1763T05",
+"D1763T24", "D1763T37", "D1763T13", "D1763T31", "D1763T44", "D1763T30", "D1763T01",
+"D1763T43", "D1763T21", "D1763T40", "D1763T08", "D1763T28", "D1763T14", "D1763T48",
+"D1763T07", "D1763T19", "D1763T42", "D1763T23", "D1763T20", "D1763T34", "D1763T45",
+"D1763T26", "D1763T50", "D1763T12", "D1763T47", "D1763T32", "D1763T35", "D1763T03",
+"D1763T33", "D1763T17", "D1763T09", "D1763T38", "D1763T41", "D1763T36", "D1763T55",
+"D1763T54", "D1763T27", "D1763T46", "D1763T53", "D1763T52", "D1763T16", "D1763T57",
+"D1763T51", "D1763T02", "D1763T39", "D1763T49", "D1763T29"]
+}

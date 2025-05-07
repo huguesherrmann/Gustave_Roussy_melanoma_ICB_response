@@ -1,0 +1,2 @@
+# From https://rseqc.sourceforge.net/#download-gene-models-update-on-12-14-2021
+wget https://sourceforge.net/projects/rseqc/files/BED/Human_Homo_sapiens/hg38_GENCODE.v38.bed.gz/download

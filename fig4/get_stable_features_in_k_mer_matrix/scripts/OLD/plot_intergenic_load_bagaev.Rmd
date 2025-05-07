@@ -1,0 +1,205 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r include=FALSE}
+library(data.table)
+suppressPackageStartupMessages(library(circlize))
+suppressPackageStartupMessages(library(ComplexHeatmap))
+library(ggpubr)
+library(tidyverse)
+source("/mnt/beegfs/userdata/h_herrmann/mela_ici_response/fit_predictive_models/scripts/functions_for_fitting models.R")
+```
+
+## Load data
+```{r}
+annot <- fread("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/part2/regulon_counts_with_annotation.tsv")
+
+nr_differential_regulons <- "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/stability/non_responder_stable_regulons.tsv"
+r_differential_regulons <- "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/stability/responder_stable_regulons.tsv"
+regulon_counts <- "/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/regulon_counts_with_annotation_purity_depth_ajusted.tsv"
+design <- "/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv"
+bagaev <- "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/Bagaev/bagaev_signature_scores.tsv"
+
+nr_differential_regulons <- fread(nr_differential_regulons)
+r_differential_regulons <- fread(r_differential_regulons)
+regulon_counts <- fread(regulon_counts, drop = c("Class", "Feature", "Intra_cluster_feature_id"))
+design <- read_tsv(design, show_col_types = FALSE)
+bagaev <- read_tsv(bagaev, show_col_types = FALSE) %>%
+  rename("Signature" = "...1") %>%
+  select(all_of(c("Signature", design$Sample_ID))) %>%
+  column_to_rownames("Signature") %>%
+  t_df() %>%
+  rownames_to_column("Sample_ID")
+
+x <- gseaplot(gsea, by = "all", geneSetID = 1)
+ggplot(odds_ratio_df, aes(x = OR, y = Feature)) + 
+  geom_vline(aes(xintercept = 1), linewidth = 0.25, linetype = "dashed") + 
+  geom_errorbarh(aes(xmax = Upper, xmin = Lower), linewidth = 0.5, height = 0.3, color = "black") +
+  geom_point(size = 2.5, fill = "deeppink1", shape = 22) +
+  scale_x_continuous(trans = "log10") +
+  theme_classic() +
+  theme(panel.grid.minor = element_blank(), axis.text = element_text(size = 15, color = "black"), text = element_text(size = 15, "black")) +
+  ylab("") +
+  xlab("Odds-ratio (95% CI)") +
+  guides(y.sec = ggh4x::guide_axis_manual(title = element_blank(), labels = paste0(" ", odds_ratio_df$Informative)))
+
+ggplot(hr_os_df, aes(x = HR, y = Feature)) + 
+  geom_vline(aes(xintercept = 1), linewidth = 0.25, linetype = "dashed") + 
+  geom_errorbarh(aes(xmax = Upper, xmin = Lower), linewidth = 0.5, height = 0.3, color = "black") +
+  geom_point(size = 2.5, fill = "deeppink1", shape = 22) +
+  scale_x_continuous(trans = "log10") +
+  theme_classic() +
+  theme(panel.grid.minor = element_blank(), axis.text = element_text(size = 15, color = "black"), text = element_text(size = 15, "black")) +
+  ylab("") +
+  xlab("Hazard-ratio (95% CI)") +
+  guides(y.sec = ggh4x::guide_axis_manual(title = element_blank(), labels = paste0(" ", hr_os_df$Informative)))
+
+auc_plot
+or_plot
+hr_os_plot
+hr_pfs_plot
+```
+
+# Compute intergenic load
+```{r}
+top_nr_intergenics <- nr_differential_regulons[grepl("chr[0-9]*:", Regulon) & N_redundancy >= 60, ] %>% pull(Regulon)
+top_r_intergenics <- r_differential_regulons[grepl("chr[0-9]*:", Regulon) & N_redundancy >= 60, ] %>% pull(Regulon)
+top_alr <- nr_differential_regulons[grepl("repeat_ALR", Regulon) & N_redundancy >= 60, ] %>% pull(Regulon)
+
+nr_intergenic_load <- regulon_counts[Regulon %in% top_nr_intergenics, ] %>%
+  summarize_at(design$Sample_ID, sum) %>%
+  t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  mutate(Condition = "NR features") %>%
+  mutate(V1 = sqrt(V1))
+r_intergenic_load <- regulon_counts[Regulon %in% top_r_intergenics, ] %>%
+  summarize_at(design$Sample_ID, sum) %>%
+  t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  mutate(Condition = "R features")
+nr_alr_load <- regulon_counts[Regulon %in% top_alr, ] %>%
+  summarize_at(design$Sample_ID, sum) %>%
+  t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  mutate(Condition = "NR features")
+all_intergenic_load <- nr_intergenic_load %>% rbind(r_intergenic_load) %>%
+  inner_join(design %>% select(Sample_ID, Response), ., by = "Sample_ID") %>%
+  mutate(Response = if_else(Response == "responder", "R", "NR"))
+
+# ggplot(all_intergenic_load, aes(Response, V1, fill = Response)) +
+#   geom_boxplot() +
+#   facet_wrap(~ Condition, scales = "free") +
+#   stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 4) +
+#   theme_classic() +
+#   theme(axis.text.x = element_text(size = 16, color = "black"),
+#         axis.text.y = element_text(size = 16, color = "black"),
+#         text = element_text(size = 16, color = "black"),
+#         strip.text = element_text(size = 16)) +
+#   guides(fill = "none") +
+#   labs(x = "", y = "")
+```
+Add bagaev and scale
+```{r}
+tme_classification <- data.frame(Functional_group = c(rep("Anti tumor microenvironment", 11),
+                                                      rep("Pro tumor microenvironment", 11),
+                                                      rep("Angiogenesis fibrosis", 5),
+                                                      rep("Malignant cell propreties", 2),
+                                                      rep("Intergenic load", 2),
+                                                      c("ALR load")),
+                                 Sub_group = c(rep("Antigen presentation", 3),
+                                               rep("Cytotoxic T and NK cell", 4),
+                                               rep("Anti tumor microenvironment", 4),
+                                               rep("Pro tumor microenvironment", 3),
+                                               rep("T reg", 2),
+                                               rep("Granulocytes", 2),
+                                               rep("MDSC", 2),
+                                               rep("Macrophages", 2),
+                                               rep("Angiogenesis", 2),
+                                               rep("Stromal", 3),
+                                               rep("Malignant cell properties", 2),
+                                               rep("Intergenic load", 2),
+                                               c("ALR load")),
+                                 Signature = c("MHCI", "MHCII", "Coactivation_molecules",
+                                               "Effector_cells", "T_cells", "T_cell_traffic", "NK_cells",
+                                               "B_cells", "M1_signatures", "Th1_signature", "Antitumor_cytokines",
+                                               "Checkpoint_inhibition", "Th2_signature", "Protumor_cytokines",
+                                               "Treg", "T_reg_traffic",
+                                               "Neutrophil_signature", "Granulocyte_traffic",
+                                               "MDSC", "MDSC_traffic",
+                                               "Macrophages", "Macrophage_DC_traffic",
+                                               "Angiogenesis", "Endothelium",
+                                               "CAF", "Matrix", "Matrix_remodeling",
+                                               "Proliferation_rate", "EMT_signature",
+                                               "NR_intergenic_load", "R_intergenic_load", "ALR_load"))
+
+all_intergenic_load <- nr_intergenic_load %>%
+  select(Sample_ID, V1) %>%
+  rename(NR_intergenic_load = V1) %>%
+  mutate(R_intergenic_load = r_intergenic_load$V1) %>%
+  mutate(ALR_load = nr_alr_load$V1) %>%
+  inner_join(., bagaev, by = "Sample_ID") %>%
+  column_to_rownames("Sample_ID") %>%
+  scale() %>%
+  as.data.frame() %>%
+  mutate(NR_intergenic_load = if_else(NR_intergenic_load > 4, 4, NR_intergenic_load)) %>%
+  mutate(R_intergenic_load = if_else(R_intergenic_load > 4, 4, R_intergenic_load)) %>%
+  t_df() %>%
+  rownames_to_column("Signature") %>%
+  inner_join(tme_classification, ., by = "Signature") %>%
+  column_to_rownames("Signature")
+```
+
+```{r}
+library(grid)
+
+ggplot(iris, aes(Sepal.Length, Petal.Width)) +
+  geom_point(color = '#2896ba') +
+  geom_vline(xintercept = 5.5, color = 'gray50') +
+  geom_hline(yintercept = 0.8, color = 'gray50') +
+  coord_cartesian(clip = 'off') +
+  theme_minimal(base_size = 16) +
+  theme(axis.title = element_text(hjust = 0),
+        plot.caption = element_text(hjust = 0),
+        panel.grid = element_blank()) +
+  annotation_custom(segmentsGrob(c(0.3, -0.1), c(-0.085, 0.28), 
+                                 c(1, -0.1), c(-0.085, 1), gp = gpar(lwd = 2),
+                                arrow = arrow(length = unit(2.5, 'mm')))) +
+  labs(caption = paste0("Here is a very long caption to demonstrate that ",
+                        "it is possible\nto add a very long caption ",
+                        'underneath the x axis, thereby\n',
+                        'emulating the caption in the plot in the question.'),
+       title = 'Another iris plot', subtitle = 'Just in case you need one')
+```
+```{r}
+ggplot(odds_ratio_df, aes(x = OR, y = Feature)) + 
+  geom_vline(aes(xintercept = 1), linewidth = 0.25, linetype = "dashed") + 
+  geom_errorbarh(aes(xmax = Upper, xmin = Lower), linewidth = 0.5, height = 0.3, color = "black") +
+  geom_point(size = 2.5, fill = "deeppink1", shape = 22) +
+  scale_x_continuous(trans = "log10", position = "top") +
+  #scale_y_discrete(expand = c(0.1, 0)) +
+  theme_classic() +
+  theme(panel.grid.minor = element_blank(), axis.text = element_text(size = 15, color = "black"), text = element_text(size = 15, color = "black")) +
+  ylab("") +
+  xlab("Odds-ratio (95% CI)") +
+  guides(y.sec = ggh4x::guide_axis_manual(title = element_blank(), labels = paste0(" ", odds_ratio_df$Informative))) +
+  coord_cartesian(clip = "off") +
+  annotation_custom(segmentsGrob(c(0.3), c(-0.001), 
+                                 c(0.8), c(-0.001), gp = gpar(lwd = 2),
+                                arrow = arrow(length = unit(2.5, 'mm')))) +
+  labs(caption = paste0("Associated with response               "))
+
+
+ggplot(hr_os_df, aes(x = HR, y = Feature)) + 
+  geom_vline(aes(xintercept = 1), linewidth = 0.25, linetype = "dashed") + 
+  geom_errorbarh(aes(xmax = Upper, xmin = Lower), linewidth = 0.5, height = 0.3, color = "black") +
+  geom_point(size = 2.5, fill = "deeppink1", shape = 22) +
+  scale_x_continuous(trans = "log10") +
+  theme_classic() +
+  theme(panel.grid.minor = element_blank(), axis.text = element_text(size = 15, color = "black"), text = element_text(size = 15, color = "black")) +
+  ylab("") +
+  xlab("Hazard-ratio OS (95% CI)") +
+  guides(y.sec = ggh4x::guide_axis_manual(title = element_blank(), labels = paste0(" ", hr_os_df$Informative)))
+```
+

@@ -1,0 +1,205 @@
+"""
+@modified: 11/05/22
+@main_dev: Hugues Herrmann
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+COUNTS = config["counts"]
+TPM = config["tpm"]
+DESIGN = config["design"]
+ANNOTATION = config["annotation"]
+OUT_DIR = config["out_dir"]
+
+# Optional
+COHORT = config["cohort"] if "cohort" in config else ""
+MART = config["mart"] if "mart" in config else "NULL"
+L2FC = config["log2FC"] if "log2FC" in config else 0
+ALPHA_DEG = config["alpha_deg"] if "alpha_deg" in config else 0.05
+ALPHA_GSEA = config["alpha_gsea"] if "alpha_gsea" in config else 0.1
+TUMOR_PURITY = config["tumor_purity"] if "tumor_purity" in config else "FALSE"
+
+# Software
+PYTHON = "/mnt/beegfs/userdata/h_herrmann/.environment_conda/bagaev/bin/python3"
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        coding_deg = OUT_DIR + "DEG/coding_deg.tsv",
+        non_coding_deg = OUT_DIR + "DEG/non_coding_deg.tsv",
+        coding_hallmarks = OUT_DIR + "hallmark/coding_genes_hallmarks.tsv",
+        estimate = OUT_DIR + "deconvolution/ESTIMATE_estimations.tsv",
+        bagaev_plot = OUT_DIR + "Bagaev/heatmap_Bagaev_scores.png",
+        bagaev_subtype_labels = OUT_DIR + "Bagaev/bagaev_subtype_labels.tsv",
+        bagaev_subtype_proba = OUT_DIR + "Bagaev/bagaev_subtype_proba.tsv",
+        coding_volcano_plot = OUT_DIR + "volcano/coding_volcano_plot.pdf"
+        
+
+rule diff_expression:
+    input:
+        counts = COUNTS,
+        design = DESIGN,
+        annotation = ANNOTATION,
+        estimate = OUT_DIR + "deconvolution/ESTIMATE_estimations.tsv" # For Tumor purity estimations
+    output:
+        coding_counts = OUT_DIR + "DEG/coding_counts.tsv",
+        coding_deg = OUT_DIR + "DEG/coding_deg.tsv",
+        non_coding_deg = OUT_DIR + "DEG/non_coding_deg.tsv",
+        stats_coding = OUT_DIR + "DEG/shrunk_stats_coding_genes.tsv",
+        stats_non_coding = OUT_DIR + "DEG/shrunk_stats_non_coding_genes.tsv"
+    params:
+        cohort = COHORT,
+        out_dir = OUT_DIR,
+        mart = MART,
+        l2fc = L2FC,
+        alpha_deg = ALPHA_DEG,
+        tumor_purity = TUMOR_PURITY
+    run:
+        shell("Rscript scripts/01_identify_diff_expressed_genes.R --counts {input.counts} \
+        --cohort {params.cohort} \
+        --design {input.design} \
+        --annotation {input.annotation} \
+        --out_dir {params.out_dir} \
+        --mart {params.mart} \
+        --l2fc {params.l2fc} \
+        --alpha {params.alpha_deg} \
+        --tumor_purity {params.tumor_purity}")
+
+rule plot_volcano_plots:
+    input:
+        stats_coding = OUT_DIR + "DEG/shrunk_stats_coding_genes.tsv",
+        stats_non_coding = OUT_DIR + "DEG/shrunk_stats_non_coding_genes.tsv"
+    output:
+        coding_volcano_plot = OUT_DIR + "volcano/coding_volcano_plot.pdf",
+        non_coding_volcano_plot = OUT_DIR + "volcano/non_coding_volcano_plot.pdf"
+    params:
+        out_dir = OUT_DIR,
+        alpha = ALPHA_DEG
+    run:
+        shell("Rscript scripts/09_plot_volcano_plots.R --stats_coding {input.stats_coding} \
+        --stats_non_coding {input.stats_non_coding} \
+        --alpha {params.alpha} \
+        --out_dir {params.out_dir}")
+
+rule hallmark_enrichment:
+    input:
+        design = DESIGN,
+        coding_counts = OUT_DIR + "DEG/coding_counts.tsv",
+        coding_deg = OUT_DIR + "DEG/coding_deg.tsv",
+        non_coding_deg = OUT_DIR + "DEG/non_coding_deg.tsv",
+        stats_coding = OUT_DIR + "DEG/shrunk_stats_coding_genes.tsv",
+        stats_non_coding = OUT_DIR + "DEG/shrunk_stats_non_coding_genes.tsv"
+    output:
+        coding_hallmarks = OUT_DIR + "hallmark/coding_genes_hallmarks.tsv",
+        ssgsea_coding_hallmarks = OUT_DIR + "hallmark/ssGSEA_coding_genes_hallmarks.tsv"
+    params:
+        cohort = COHORT,
+        out_dir = OUT_DIR,
+        mart = MART,
+        alpha_gsea = ALPHA_GSEA
+    run:
+        shell("Rscript scripts/02_analyze_hallmark_enrichment.R --coding_counts {input.coding_counts} \
+        --cohort {params.cohort} \
+        --coding_deg {input.coding_deg} \
+        --non_coding_deg {input.non_coding_deg} \
+        --stats_coding {input.stats_coding} \
+        --stats_non_coding {input.stats_non_coding} \
+        --design {input.design} \
+        --out_dir {params.out_dir} \
+        --mart {params.mart} \
+        --alpha {params.alpha_gsea}")
+
+rule go_terms:
+    input:
+        coding_deg = OUT_DIR + "DEG/coding_deg.tsv"
+    output:
+        go_terms = OUT_DIR + "GO_terms/go_terms.tsv",
+        go_terms_png = OUT_DIR + "GO_terms/go_terms.png",
+        go_terms_svg = OUT_DIR + "GO_terms/go_terms.svg"
+    params:
+        cohort = COHORT,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/03_analyze_GO_term_enrichment.R --coding_deg {input.coding_deg} \
+        --cohort {params.cohort} \
+        --out_dir {params.out_dir}")
+
+rule cell_fractions:
+    input:
+        tpm = TPM,
+        design = DESIGN,
+        annotation = ANNOTATION
+    output:
+        epic = OUT_DIR + "deconvolution/EPIC_estimations.tsv",
+        quantiseq = OUT_DIR + "deconvolution/quanTIseq_estimations.tsv",
+        estimate = OUT_DIR + "deconvolution/ESTIMATE_estimations.tsv",
+        mcpcounter = OUT_DIR + "deconvolution/MCPcounter_estimations.tsv"
+    params:
+        cohort = COHORT,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/04_estimate_cell_fractions.R --tpm {input.tpm} \
+        --cohort {params.cohort} \
+        --design {input.design} \
+        --annotation {input.annotation} \
+        --out_dir {params.out_dir}")
+
+rule get_gene_symbols_tpm:
+    input:
+        tpm = TPM
+    output:
+        symbol_tpm = OUT_DIR + "Bagaev/symbols_tpm.tsv"
+    params:
+        cohort = COHORT,
+        out_dir = OUT_DIR,
+        mart = MART
+    run:
+        shell("Rscript scripts/05_get_gene_symbols_tpm.R --cohort {params.cohort} \
+        --tpm {input.tpm} \
+        --mart {params.mart} \
+        --out_dir {params.out_dir}")
+
+rule get_Bagaev_scores:
+    input:
+        estimate = OUT_DIR + "deconvolution/ESTIMATE_estimations.tsv",
+        symbol_tpm = OUT_DIR + "Bagaev/symbols_tpm.tsv"
+    output:
+        bagaev_scores = OUT_DIR + "Bagaev/bagaev_signature_scores.tsv"
+    params:
+        python = PYTHON
+    run:
+        shell("{params.python} scripts/06_calculate_Bagaev_ssGSEA.py -i {input.symbol_tpm} \
+        -o {output.bagaev_scores}")
+
+rule predict_Bagaev_subtype:
+    input:
+        estimate = OUT_DIR + "deconvolution/ESTIMATE_estimations.tsv",
+        symbol_tpm = OUT_DIR + "Bagaev/symbols_tpm.tsv"
+    output:
+        bagaev_subtype_labels = OUT_DIR + "Bagaev/bagaev_subtype_labels.tsv",
+        bagaev_subtype_proba = OUT_DIR + "Bagaev/bagaev_subtype_proba.tsv"
+    params:
+        python = PYTHON,
+        out_dir = OUT_DIR + "/Bagaev/"
+    run:
+        shell("{params.python} scripts/07_predict_immune_subtype_bagaev.py -i {input.symbol_tpm} \
+        -o {params.out_dir}")
+
+rule plot_Bagaev_scores:
+    input:
+        estimate = OUT_DIR + "deconvolution/ESTIMATE_estimations.tsv",
+        bagaev_scores = OUT_DIR + "Bagaev/bagaev_signature_scores.tsv",
+        bagaev_subtype_labels = OUT_DIR + "Bagaev/bagaev_subtype_labels.tsv",
+        design = DESIGN
+    output:
+        bagaev_plot = OUT_DIR + "Bagaev/heatmap_Bagaev_scores.png" 
+    params:
+        cohort = COHORT,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/08_plot_Bagaev_scores.R --cohort {params.cohort} \
+        --bagaev {input.bagaev_scores} \
+        --subtypes {input.bagaev_subtype_labels} \
+        --design {input.design} \
+        --out_dir {params.out_dir}")

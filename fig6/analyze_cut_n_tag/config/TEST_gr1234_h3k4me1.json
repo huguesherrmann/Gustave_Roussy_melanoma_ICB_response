@@ -1,0 +1,8 @@
+{
+  "bam_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/star/gr1234/bam/",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_cut_n_tag/test/",
+  "peak_bed_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_cut_n_tag/gr1234/macs2/",
+  "n_bases": 500,
+  "threads": 4,
+  "sample_ID": ["D437T73", "D1332T43", "D1332T35", "D1332T46", "D437T81", "D437T40"]
+}

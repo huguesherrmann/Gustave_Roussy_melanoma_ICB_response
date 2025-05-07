@@ -1,0 +1,76 @@
+"""
+@modified: 11/05/22
+@main_dev: Hugues Herrmann
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+FASTQ_DIR = config["fastq_dir"]
+SAMPLE_ID = config["sample_ID"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+STAR_INDEX = config["star_index"]
+OUT_DIR = config["out_dir"]
+THREADS = config["threads"] if "threads" in config else 1
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        stats = OUT_DIR + "alignment_metrics/stats.txt",
+        n_lines = OUT_DIR + "n_reads/n_lines_fastq.txt"
+        
+
+rule count_reads:
+    input:
+        r1 = expand(FASTQ_DIR + "{sample_ID}" + R1_SUFFIX, sample_ID = SAMPLE_ID),
+        r2 = expand(FASTQ_DIR + "{sample_ID}" + R2_SUFFIX, sample_ID = SAMPLE_ID)
+    output:
+        n_lines = OUT_DIR + "n_reads/n_lines_fastq.txt"
+    threads: 1
+    run:
+        shell("echo 'Sample_ID Nb_lines' >> {output.n_lines}")
+        for sample in SAMPLE_ID:
+            shell("echo {sample} $(zcat {fastq_dir}{sample}{r1_suffix} | wc -l) >> {output}".format(fastq_dir = FASTQ_DIR, sample = sample, r1_suffix = R1_SUFFIX, output = output.n_lines))
+
+
+rule star:
+    input:
+        r1 = FASTQ_DIR + "{sample_ID}" + R1_SUFFIX,  
+        r2 = FASTQ_DIR + "{sample_ID}" + R2_SUFFIX,
+        star_index = STAR_INDEX
+    output:
+        stats = OUT_DIR + "star/" + "{sample_ID}" + "/Log.final.out"
+    params:
+        threads = THREADS,
+    threads: THREADS
+    run:
+        shell("if [ -d {tmp_dir} ]; then rm -r {tmp_dir}; fi; mkdir {tmp_dir}".format(tmp_dir = OUT_DIR + "star/" + wildcards.sample_ID))
+        shell("ls {tmp_dir}".format(tmp_dir = OUT_DIR + "star/" + wildcards.sample_ID))
+        shell("STAR --genomeDir {index} \
+        --runThreadN {threads} \
+        --outSAMtype BAM SortedByCoordinate \
+        --limitBAMsortRAM 100000000000 \
+        --outStd BAM_SortedByCoordinate \
+        --readFilesIn <(gunzip -c {r1}) <(gunzip -c {r2}) \
+        --outTmpDir {tmp_dir} \
+        --outFileNamePrefix {out_dir} > {output}".format(index = input.star_index, threads = params.threads, r1 = input.r1, r2 = input.r2, tmp_dir = OUT_DIR + "star/" + wildcards.sample_ID + "/tmp", out_dir = OUT_DIR + "star/" + wildcards.sample_ID + "/", output = OUT_DIR + "star/" + wildcards.sample_ID + "/Aligned.bam"))
+        shell("mv {old_bam} {new_bam}".format(old_bam = OUT_DIR + "star/" + wildcards.sample_ID + "/Aligned.bam", new_bam = OUT_DIR + "star/" + wildcards.sample_ID + "/" + wildcards.sample_ID + ".bam"))
+        shell("rm {log}".format(log = OUT_DIR + "star/" + wildcards.sample_ID + "/Log.out"))
+        shell("rm {log}".format(log = OUT_DIR + "star/" + wildcards.sample_ID + "/Log.progress.out"))
+        shell("rm {log}".format(log = OUT_DIR + "star/" + wildcards.sample_ID + "/SJ.out.tab"))
+        shell("rm {log}".format(log = OUT_DIR + "star/" + wildcards.sample_ID + "/Log.std.out"))
+        shell("rm {bam}".format(bam = OUT_DIR + "star/" + wildcards.sample_ID + "/" + wildcards.sample_ID + ".bam"))
+
+
+rule merge_stats:
+    input:
+        bam = expand(OUT_DIR + "star/" + "{sample_ID}" + "/Log.final.out", sample_ID = SAMPLE_ID)
+    output:
+        stats = OUT_DIR + "alignment_metrics/stats.txt"
+    params:
+        star_dir = OUT_DIR + "star/"
+    run:
+        #shell("touch {output.stats}")
+        shell("awk -f scripts/01_merge_star_out.awk {params.star_dir}*/Log.final.out > {output.stats}")
+        shell("sed -i -E '/UNIQUE READS:|MULTI-MAPPING READS:|UNMAPPED READS:|CHIMERIC READS:/d' {output.stats}")

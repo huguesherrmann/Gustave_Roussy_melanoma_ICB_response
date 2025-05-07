@@ -1,0 +1,14 @@
+{
+  "work_dir": "/mnt/beegfs/scratch/h_herrmann/kallisto/gr123/",
+  "output_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/gr2_tt/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/gr123/",
+  "cohort": "gr2_tt",
+  "r1_suffix": "_trimmed.R1.fastq.gz",
+  "r2_suffix": "_trimmed.R2.fastq.gz",
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "kallisto_threads": 2,
+  "sample_ID": ["D821T01", "D821T02", "D821T04", "D821T05", "D821T09", "D821T10", "D821T11", "D821T12", 
+"D821T22", "D821T25", "D821T35", "D821T36", "D821T38", "D821T47", "D821T49", "D821T52", "D821T55", 
+"D821T56", "D821T61"]
+}

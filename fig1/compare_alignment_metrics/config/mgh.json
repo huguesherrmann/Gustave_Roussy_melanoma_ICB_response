@@ -1,0 +1,12 @@
+{
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/mgh/",
+  "star_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/STAR_index_hg38v24",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_alignment_metrics/mgh/",
+  "threads": 6,
+  "r1_suffix": "_1.fastq.gz",
+  "r2_suffix": "_2.fastq.gz",
+  "sample_ID": ["SRR7344544", "SRR7344552", "SRR7344554", 
+"SRR7344559", "SRR7344564", "SRR7344565", "SRR7344567", 
+"SRR7344574", "SRR7344575", "SRR13853353", "SRR13853355", "SRR13853358", "SRR13853359",
+"SRR13853366", "SRR13853368", "SRR13853370", "SRR13853372", "SRR13853375", "SRR13853377"]
+}

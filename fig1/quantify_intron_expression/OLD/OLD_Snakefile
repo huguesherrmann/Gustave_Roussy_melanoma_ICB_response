@@ -1,0 +1,138 @@
+"""
+@modified: 02/08/24
+@main_dev: Hugues Herrmann
+Generate an intron matrix count.
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+OUT_DIR = config["out_dir"]
+FASTQ_DIR = config["fastq_dir"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+SAMPLE_ID = config["sample_ID"]
+KALLISTO_INDEX = config["kallisto_index"]
+INTRON_DIR = config["intron_dir"]
+
+# Optional
+THREADS = config["threads"] if "threads" in config else 1
+
+# Software
+KALLISTO = "/mnt/beegfs/userdata/h_herrmann/tools_software/kallisto/build/src/kallisto" 
+BUSTOOLS = "/mnt/beegfs/userdata/h_herrmann/tools_software/bustools/build/src/bustools"
+
+
+### ========== Rules ========== ###
+rule all:
+    input: 
+        #mtx_spliced = expand(OUT_DIR + "captured_bus/{sample_ID}/spliced.mtx", sample_ID = SAMPLE_ID),
+        #mtx_unspliced = expand(OUT_DIR + "captured_bus/{sample_ID}/unspliced.mtx", sample_ID = SAMPLE_ID)
+        x = OUT_DIR + "x"
+
+
+#rule kallisto_index
+
+rule kallisto_bus:
+    input: 
+        r1 = FASTQ_DIR + "{sample_ID}" + R1_SUFFIX,
+        r2 = FASTQ_DIR + "{sample_ID}" + R2_SUFFIX,
+        kallisto_index = KALLISTO_INDEX
+    output:
+        bus = OUT_DIR + "bus/{sample_ID}/output.bus",
+        transcripts = OUT_DIR + "bus/{sample_ID}/transcripts.txt",
+        matrix = OUT_DIR + "bus/{sample_ID}/matrix.ec"
+    params:
+        kallisto = KALLISTO,
+        out_dir = OUT_DIR + "bus/{sample_ID}",
+        threads = THREADS
+    threads: THREADS
+    run:
+        shell("{params.kallisto} bus -i {input.kallisto_index} \
+        -o {params.out_dir} \
+        -t {params.threads} \
+        --paired \
+        -x Bulk \
+        {input.r1} {input.r2}")
+
+rule bustools_sort:
+    input:
+        bus = OUT_DIR + "bus/{sample_ID}/output.bus"
+    output:
+        sorted_bus = OUT_DIR + "bus/{sample_ID}/sorted_output.bus"
+    params:
+        bustools = BUSTOOLS,
+        threads = THREADS
+    threads: THREADS
+    run:
+        shell("{params.bustools} sort -o {output.sorted_bus} {input.bus}")
+
+rule bustools_capture:
+    input:
+        sorted_bus = OUT_DIR + "bus/{sample_ID}/sorted_output.bus",
+        transcripts = OUT_DIR + "bus/{sample_ID}/transcripts.txt",
+        matrix = OUT_DIR + "bus/{sample_ID}/matrix.ec",
+        introns_tx_to_capture = INTRON_DIR + "introns_tx_to_capture.txt",
+        cdna_tx_to_capture = INTRON_DIR + "cDNA_tx_to_capture.txt"
+    output:
+        spliced = OUT_DIR + "captured_bus/{sample_ID}/spliced.bus",
+        unspliced = OUT_DIR + "captured_bus/{sample_ID}/unspliced.bus"
+    params:
+        bustools = BUSTOOLS,
+        threads = THREADS
+    threads: THREADS
+    run:
+        shell("{params.bustools} capture -s \
+        -x \
+        -o {output.spliced} \
+        -c {input.introns_tx_to_capture} \
+        -e {input.matrix} \
+        -t {input.transcripts} \
+        {input.sorted_bus}")
+        shell("{params.bustools} capture -s \
+        -x \
+        -o {output.unspliced} \
+        -c {input.cdna_tx_to_capture} \
+        -e {input.matrix} \
+        -t {input.transcripts} \
+        {input.sorted_bus}")
+
+rule bustools_count:
+    input:
+        spliced = OUT_DIR + "captured_bus/{sample_ID}/spliced.bus",
+        unspliced = OUT_DIR + "captured_bus/{sample_ID}/unspliced.bus",
+        tr2g = INTRON_DIR + "tr2g.tsv",
+        transcripts = OUT_DIR + "bus/{sample_ID}/transcripts.txt",
+        matrix = OUT_DIR + "bus/{sample_ID}/matrix.ec"
+    output:
+        mtx_spliced = OUT_DIR + "captured_bus/{sample_ID}/spliced.mtx",
+        gene_spliced = OUT_DIR + "captured_bus/{sample_ID}/spliced.genes.txt",
+        mtx_unspliced = OUT_DIR + "captured_bus/{sample_ID}/unspliced.mtx",
+        gene_unspliced = OUT_DIR + "captured_bus/{sample_ID}/unspliced.genes.txt"
+    params:
+        bustools = BUSTOOLS,
+        out_dir = OUT_DIR + "captured_bus/{sample_ID}/"
+    run:
+        shell("{params.bustools} count --em \
+        --genecounts \
+        -o {params.out_dir}spliced \
+        -g {input.tr2g} \
+        -e {input.matrix} \
+        -t {input.transcripts} \
+        {input.spliced}")
+        shell("{params.bustools} count --em \
+        --genecounts \
+        -o {params.out_dir}unspliced \
+        -g {input.tr2g} \
+        -e {input.matrix} \
+        -t {input.transcripts} \
+        {input.unspliced}")
+
+
+rule x:
+    input:
+        mtx_spliced = expand(OUT_DIR + "captured_bus/{sample_ID}/spliced.mtx", sample_ID = SAMPLE_ID),
+        mtx_unspliced = expand(OUT_DIR + "captured_bus/{sample_ID}/unspliced.mtx", sample_ID = SAMPLE_ID)
+    output:
+        x = OUT_DIR + "x"
+    run:
+        shell("touch {output.x}")

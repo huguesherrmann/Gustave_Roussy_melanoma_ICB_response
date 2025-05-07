@@ -1,0 +1,509 @@
+---
+title: "Exploration introns exons and intergenics"
+author: "Hugues Herrmann"
+date: "14/06/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(ggpubr)
+library(tidyverse)
+source("/mnt/beegfs/userdata/h_herrmann/mela_ici_response/get_stable_features_in_k_mer_matrix/scripts/functions_for_processing_regulons.R")
+```
+
+```{r message=TRUE, include=FALSE}
+design <- read_tsv("/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv", show_col_types = FALSE) %>%
+  select(Sample_ID, Response)
+regulon_counts <- fread("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/regulon_counts_with_annotation_purity_depth_ajusted.tsv")
+stability_regulons <- fread("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/all_stable_regulons.tsv")
+# regulon_counts_raw <- fread("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/regulons/all_regulon_counts.tsv")
+# correspondence <- fread("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/regulons/all_correspondence_contigs_regulons.tsv")
+# nr_stable_regulons <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/stability/non_responder_stable_regulons.tsv", show_col_types = FALSE) %>%
+#   mutate(Condition = "non_responder")
+# r_stable_regulons <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/stability/responder_stable_regulons.tsv", show_col_types = FALSE) %>%
+#   mutate(Condition = "responder")
+# both <- r_stable_regulons %>% add_row(nr_stable_regulons)
+# write.table(both, "/mnt/beegfs/scratch/h_herrmann/all_stable_regulons.tsv", sep = "\t", row.names = FALSE)
+```
+
+### Normalisation par la tumor purity + profondeur (calculée sur les régulons)
+```{r}
+x <- correspondence %>% distinct(Regulon, .keep_all = TRUE) %>% select(-tag)
+regulon_counts2 <- inner_join(x, regulon_counts_raw, by = "Regulon")
+bis <- correspondence %>% group_by(Regulon) %>%
+  summarize(N =)
+# regulon_counts <- normalize_by_tumor_purity(regulon_counts_raw %>% column_to_rownames("Regulon"), design)
+# depth_factors <- colSums(regulon_counts)
+# 
+# regulon_counts <- sweep(regulon_counts * 10000000000, 2, depth_factors, "/") %>%
+#   rownames_to_column("Regulon")
+# x <- correspondence %>% distinct(Regulon, .keep_all = TRUE) %>% select(-tag)
+# regulon_counts2 <- inner_join(x, regulon_counts, by = "Regulon")
+# write.table(regulon_counts2, "/mnt/beegfs/scratch/h_herrmann/regulon_counts_with_annotation_purity_depth_ajusted.tsv", sep = "\t", row.names = FALSE)
+```
+
+# 3x plus d'introns chez les regulons stables des NR
+```{r}
+stable_regulons <- stability_regulons %>% 
+  filter(N_redundancy >= 80) %>%
+  filter(Class == "exon" | Class == "intron")
+table(stable_regulons$Condition, stable_regulons$Class)
+length(unique(stable_regulons$Feature))
+```
+Extraction des gènes associés aux regulons stables
+```{r}
+stable_genes <- stable_regulons %>% pull(Feature)
+```
+Extraction des comptes des regulons associés à un gène stable avec des comptes exoniques et introniques
+```{r}
+counts_stable_genes <- regulon_counts[Feature %in% stable_genes, ] %>%
+  group_by(Feature) %>%
+  filter(all(c("exon", "intron") %in% Class))
+length(unique(counts_stable_genes$Feature))
+```
+Somme des comptes par gène et par classe + subset des classes + ratio
+```{r}
+sum_per_gene_class <- counts_stable_genes %>% group_by(Feature, Class) %>%
+  summarize_at(design$Sample_ID, sum)
+exons <- sum_per_gene_class %>% filter(Class == "exon") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+introns <- sum_per_gene_class %>% filter(Class == "intron") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+ratio <- introns / (introns + exons)
+ratio_w_names <- ratio %>% rownames_to_column("Feature")
+ratio_w_response <- ratio %>% t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+```
+Ratio intron / exon moyen des gènes stables NR
+```{r}
+nr <- ratio_w_names %>% filter(Feature %in% (stable_regulons %>% filter(Condition == "non_responder") %>% pull(Feature))) %>%
+  column_to_rownames("Feature") #%>%
+  #t_df() #%>%
+  # rownames_to_column("Sample_ID") %>%
+  # inner_join(design, ., by = "Sample_ID")
+nr_means <- colMeans(nr, na.rm = TRUE) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+ggplot(nr_means, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16))
+
+r <- ratio_w_names %>% filter(Feature %in% (stable_regulons %>% filter(Condition == "responder") %>% pull(Feature))) %>%
+  column_to_rownames("Feature") #%>%
+  #t_df() #%>%
+  # rownames_to_column("Sample_ID") %>%
+  # inner_join(design, ., by = "Sample_ID")
+r_means <- colMeans(r, na.rm = TRUE) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+ggplot(r_means, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16))
+```
+# On all genes
+```{r}
+all_genes <- regulon_counts %>%
+  group_by(Feature) %>%
+  filter(all(c("exon", "intron") %in% Class))
+sum_per_gene_class2 <- all_genes %>% group_by(Feature, Class) %>%
+  summarize_at(design$Sample_ID, sum)
+
+exons2 <- sum_per_gene_class2 %>% filter(Class == "exon") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+introns2 <- sum_per_gene_class2 %>% filter(Class == "intron") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+ratio2 <- introns2 / (introns2 + exons2)
+ratio_w_names2 <- ratio2 %>% rownames_to_column("Feature")
+ratio_w_response2 <- ratio2 %>% t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+x_means <- colMeans(ratio2, na.rm = TRUE) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+ggplot(x_means, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16))
+```
+
+
+
+
+## Ratio I/E top stable features
+Get stable differential features
+```{r}
+all_stables <- r_stable_regulons %>% mutate(Condition = "responder") %>%
+  add_row(nr_stable_regulons %>% mutate(Condition = "non_responder")) %>%
+  filter(N_redundancy >= 80) %>%
+  filter(Class == "exon" | Class == "intron")
+table(all_stables$Condition, all_stables$Class)
+
+all_stables_features <- all_stables %>% pull(Feature)
+```
+Get sum of all regulons belonging to differential features
+```{r}
+all_stables_contigs <- correspondence[Feature %in% all_stables_features, ] %>% 
+  distinct(Regulon) %>%
+  pull(Regulon)
+#all_stables_features_counts <- regulon_counts[Regulon %in% all_stables_contigs, ]
+all_stables_features_counts <- regulon_counts %>% filter(Regulon %in% all_stables_contigs)
+merge <- merge(correspondence, all_stables_features_counts, by = "Regulon")
+exon_merge <- merge[Class == "exon", ] %>%
+  group_by(Feature) %>%
+  summarize_at(design$Sample_ID, sum)
+intron_merge <- merge[Class == "intron", ] %>%
+  group_by(Feature) %>%
+  summarize_at(design$Sample_ID, sum)
+
+x <- intersect(exon_merge$Feature, intron_merge$Feature)
+exon_merge <- exon_merge %>% filter(Feature %in% x)
+intron_merge <- intron_merge %>% filter(Feature %in% x)
+```
+Plot raw sum of intron/exon loads of differential features
+```{r}
+exon_raw_sum <- colSums(exon_merge[, 2:146]) %>% as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  mutate(Class = "exon")
+intron_raw_sum <- colSums(intron_merge[, 2:146]) %>% as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  mutate(Class = "intron")
+merge_raw_sum <- exon_raw_sum %>% add_row(intron_raw_sum) %>%
+  inner_join(design %>% select(Sample_ID, Response), ., by = "Sample_ID")
+
+ggplot(merge_raw_sum %>% filter(Class == "exon"), aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16))
+ggplot(merge_raw_sum %>% filter(Class == "intron"), aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16))
+```
+Get ratio
+```{r}
+exon_merge <- exon_merge %>% arrange(Feature) %>%
+  column_to_rownames("Feature")
+intron_merge <- intron_merge %>% arrange(Feature) %>%
+  column_to_rownames("Feature")
+ratio <- intron_merge / (intron_merge + exon_merge)
+ratio2 <- ratio %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design %>% select(Sample_ID, Response), ., by = "Sample_ID")
+```
+
+## On all genes
+```{r}
+
+```
+
+
+
+# Sum per feature and filtering out low expressed genes
+```{r}
+NONNN
+
+threshold <- 100
+sup_threshold <- rowSums(regulon_counts_raw %>% column_to_rownames("Regulon"))
+sup_threshold <- names(sup_threshold > threshold)
+```
+
+# Intergenic burden
+Somme des régulons intergeniques (R ou NR) stables (>= 80)
+Les comptes sont ajustés pour la profondeur ou la tumor purity
+```{r}
+intergenics_r_stable_regulons <- r_stable_regulons %>% filter(N_redundancy >= 80 & Class == "intergenic") %>% pull(Regulon)
+intergenics_nr_stable_regulons <- nr_stable_regulons %>% filter(N_redundancy >= 80 & Class == "intergenic") %>% pull(Regulon)
+
+intergenics_r_stable_regulons <- regulon_counts %>% filter(Regulon %in% intergenics_r_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+intergenics_nr_stable_regulons <- regulon_counts %>% filter(Regulon %in% intergenics_nr_stable_regulons) %>%
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+
+
+ggplot(intergenics_r_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+ggplot(intergenics_nr_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+```
+
+# Intron burden
+Somme des régulons introniques (R ou NR) stables (>= 80)
+Les comptes sont ajustés pour la profondeur ou la tumor purity
+```{r}
+introns_r_stable_regulons <- r_stable_regulons %>% filter(N_redundancy >= 80 & Class == "intron") %>% pull(Regulon)
+introns_nr_stable_regulons <- nr_stable_regulons %>% filter(N_redundancy >= 80 & Class == "intron") %>% pull(Regulon)
+
+introns_r_stable_regulons <- regulon_counts %>% filter(Regulon %in% introns_r_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+introns_nr_stable_regulons <- regulon_counts %>% filter(Regulon %in% introns_nr_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+
+
+ggplot(introns_r_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+ggplot(introns_nr_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+```
+
+# Exon burden
+Somme des régulons introniques (R ou NR) stables (>= 80)
+Les comptes sont ajustés pour la profondeur ou la tumor purity
+```{r}
+exons_r_stable_regulons <- r_stable_regulons %>% filter(N_redundancy >= 80 & Class == "exon") %>% pull(Regulon)
+exons_nr_stable_regulons <- nr_stable_regulons %>% filter(N_redundancy >= 80 & Class == "exon") %>% pull(Regulon)
+
+exons_r_stable_regulons <- regulon_counts %>% filter(Regulon %in% exons_r_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+exons_nr_stable_regulons <- regulon_counts %>% filter(Regulon %in% exons_nr_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+
+
+ggplot(exons_r_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+ggplot(exons_nr_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+```
+
+# Repeat burden
+Somme des régulons introniques (R ou NR) stables (>= 80)
+Les comptes sont ajustés pour la profondeur ou la tumor purity
+```{r}
+repeats_r_stable_regulons <- r_stable_regulons %>% filter(N_redundancy >= 80 & Class == "repeat") %>% pull(Regulon)
+repeats_nr_stable_regulons <- nr_stable_regulons %>% filter(N_redundancy >= 80 & Class == "repeat") %>% pull(Regulon)
+
+repeats_r_stable_regulons <- regulon_counts %>% filter(Regulon %in% repeats_r_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+repeats_nr_stable_regulons <- regulon_counts %>% filter(Regulon %in% repeats_nr_stable_regulons) %>% 
+  column_to_rownames("Regulon") %>%
+  colSums(.) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+
+
+ggplot(repeats_r_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+ggplot(repeats_nr_stable_regulons, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of regulon counts\n(adjusted for tumor purity)")
+```
+
+# Charge global d'exon et d'intron
+Somme des comptes (ajustés purity + depth) de tous les introns et exons
+```{r}
+exon_tag <- correspondence[Class == "exon", ] %>% inner_join(., regulon_counts %>% filter(grepl("exon_", Regulon)), by = "Regulon") %>%
+  select(-tag)
+exons <- exon_tag %>% group_by(Feature) %>%
+  summarize_at(design$Sample_ID, sum)
+exon_sum <- colSums(exons[, 2:146]) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+
+intron_tag <- correspondence[Class == "intron", ] %>% inner_join(., regulon_counts %>% filter(grepl("intron_", Regulon)), by = "Regulon") %>%
+  select(-tag)
+introns <- intron_tag %>% group_by(Feature) %>%
+  summarize_at(design$Sample_ID, sum)
+intron_sum <- colSums(introns[, 2:146]) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+
+rm(correspondence)
+gc()
+
+
+ggplot(exon_sum, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of all exon regulons\n(adjusted for tumor purity)")
+ggplot(intron_sum, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Sum of all intron regulons\n(adjusted for tumor purity)")
+```
+
+# Ratio intron exon
+Seules les features avec des comptes introns et exons sont conservées + subset des features qui ont une somme chez tous les samples
+```{r}
+both <- inner_join(exons, introns, by = "Feature") %>% pull(Feature)
+
+exons2 <- exons %>% filter(Feature %in% both) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+row_sums <- rowSums(exons2)
+e <- names(which(row_sums > 0.001))
+introns2 <- introns %>% filter(Feature %in% both) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+row_sums_i <- rowSums(introns2)
+i <- names(which(row_sums_i > 0.001))
+
+intersect <- intersect(e, i)
+exons3 <- exons2[intersect, ]
+introns3 <- introns2[intersect, ]
+
+ratio <- introns3 / (introns3 + exons3)
+
+mean <- colMeans(ratio, na.rm = TRUE) %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(., design %>% select(Sample_ID, Response), by = "Sample_ID")
+ggplot(mean, aes(Response, ., fill = Response)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.5, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  labs(x = "", y = "Mean of ratio i/i+e\n(adjusted for tumor purity + depth)")
+```
+

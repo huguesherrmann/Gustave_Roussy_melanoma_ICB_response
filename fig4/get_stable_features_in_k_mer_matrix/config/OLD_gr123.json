@@ -1,0 +1,12 @@
+{
+  "counts": "/mnt/beegfs/scratch/h_herrmann/gide_mask/test_merged_contig_sorted_gide_masked_kmers_6_5_kmers.tsv",
+  "design": "/mnt/beegfs/userdata/h_herrmann/design/gr123/baseline_curated_design_gr123.tsv",
+  "annotation": "/mnt/beegfs/scratch/h_herrmann/gide_mask/test_annotation_merged_contig_sorted_gide_masked_kmers_6_5_kmers.tsv",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr123/",
+  "distance": 10000,
+  "correlation": 0.6,
+  "threads": 1,
+  "operation": "sum",
+  "verbose": TRUE
+}
+

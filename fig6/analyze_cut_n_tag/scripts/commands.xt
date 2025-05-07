@@ -1,0 +1,2 @@
+module load bedtools/2.29.2
+bedtools intersect -a D1332T35_H3K4me1.peaks.bed -b D1332T43_H3K4me1.peaks.bed D1332T46_H3K4me1.peaks.bed D437T40_H3K4me1.peaks.bed D437T73_H3K4me1.peaks.bed D437T81_H3K4me1.peaks.bed -wa > common_peak 

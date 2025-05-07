@@ -1,0 +1,14 @@
+{
+  "counts": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/merge_and_annotate/gr1234/merged_contigs_gide_masked_7_5_gr1234.tsv.gz",
+  "design": "/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/merge_and_annotate/gr1234/annotation_merged_contigs_gide_masked_7_5_gr1234.tsv.gz",
+  "indice_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/make_cross_validation_partitioning/gr1234_33_3/",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_33_3/",
+  "distance": 10000,
+  "correlation": 0.5,
+  "threads": 6,
+  "operation": "sum",
+  "n_top": 25,
+  "verbose": TRUE
+}
+

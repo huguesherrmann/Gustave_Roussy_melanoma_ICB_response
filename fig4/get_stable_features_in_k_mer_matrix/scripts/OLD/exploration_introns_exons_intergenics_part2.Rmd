@@ -1,0 +1,472 @@
+---
+title: "Exploration intron / exon part 2"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(ggpubr)
+library(tidyverse)
+source("/mnt/beegfs/userdata/h_herrmann/mela_ici_response/get_stable_features_in_k_mer_matrix/scripts/functions_for_processing_regulons.R")
+```
+
+```{r message=TRUE, include=FALSE}
+design <- read_tsv("/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv", show_col_types = FALSE) %>%
+  select(Sample_ID, Response)
+annotation <- fread("/mnt/beegfs/userdata/h_herrmann/results_and_data/gene_level_analysis/annot_lookup.tsv")
+regulon_counts <- fread("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/part2/regulon_counts_with_annotation.tsv")
+stability_regulons <- fread("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/all_stable_regulons.tsv")
+# regulon_counts_raw <- fread("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/regulons/all_regulon_counts.tsv")
+# correspondence <- fread("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_cv_20_5/regulons/all_correspondence_contigs_regulons.tsv")
+```
+
+### Create a table with regulon counts and annotation (such as feature, number of contigs per regulon, etc)
+```{r}
+# bis <- correspondence %>% group_by(Regulon) %>%
+#   summarize(N = n())
+# merge <- inner_join(correspondence, bis, by = "Regulon")
+# 
+# x <- merge %>% distinct(Regulon, .keep_all = TRUE) %>% select(-tag)
+# regulon_counts2 <- inner_join(x, regulon_counts_raw, by = "Regulon")
+# write.table(regulon_counts2, "/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/part2/regulon_counts_with_annotation.tsv", sep = "\t", row.names = FALSE)
+```
+
+Subset coding genes and keep only genes that have exonic and intronic counts
+```{r}
+coding_genes <- annotation %>% filter(gene_biotype == "protein_coding") %>% pull(hgnc_symbol)
+regulon_counts <- regulon_counts[Feature %in% coding_genes, ]
+length(unique(regulon_counts$Feature))
+
+regulon_counts <- regulon_counts %>% group_by(Feature) %>%
+  filter(all(c("exon", "intron") %in% Class))
+length(unique(regulon_counts$Feature))
+```
+Sum all regulon per gene and per class
+```{r}
+#regulon_counts2 <- regulon_counts %>% filter(Feature %in% sample(regulon_counts$Feature, 100))
+regulon_counts2 <- regulon_counts
+
+sum_per_gene <- regulon_counts2 %>% group_by(Feature, Class) %>%
+  summarize_at(design$Sample_ID, sum) 
+# row_sum <- rowSums(sum_per_gene[, 3:ncol(sum_per_gene)]) %>% t()
+# sum_per_gene <- sum_per_gene %>% mutate(Row_sum = row_sum)
+
+#min(sum_per_gene$Row_sum)
+```
+Extract exonic and intronic counts for each gene
+```{r}
+exons <- sum_per_gene %>% filter(Class == "exon") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+introns <- sum_per_gene %>% filter(Class == "intron") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+```
+Compute ratio intron / (intron + exon) for each gene only if exon and intron counts are both >= @threshold
+```{r}
+threshold <- 20
+ratio_matrix <- matrix(numeric(nrow(exons) * ncol(exons)), nrow = nrow(exons), ncol = ncol(exons))
+for (i in 1:nrow(exons)) {
+  for (j in 1:ncol(exons)) {
+    exon_ij <- exons[i, j]
+    intron_ij <- introns[i, j]
+    
+    if (exon_ij >= threshold | intron_ij >= threshold) {
+      ratio_matrix[i, j] <- intron_ij / (intron_ij + exon_ij)
+    } else {
+      ratio_matrix[i, j] <- NA
+    }
+  }
+}
+rownames(ratio_matrix) <- rownames(exons)
+colnames(ratio_matrix) <- colnames(exons)
+# ratio <- introns / (introns + exons)
+min(ratio_matrix, na.rm = TRUE)
+max(ratio_matrix, na.rm = TRUE)
+sum(is.na(ratio_matrix))
+```
+Compute mean ratio and plot
+```{r}
+mean_ratio <- colMeans(ratio_matrix, na.rm = TRUE) %>% as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+ggplot(mean_ratio, aes(Response, ., fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+## Same but with differential genes
+```{r}
+stability_regulons <- stability_regulons %>% 
+  filter(N_redundancy >= 60) %>%
+  filter(Class == "exon" | Class == "intron")
+table(stability_regulons$Condition, stability_regulons$Class)
+stability_regulons <- stability_regulons %>% 
+  filter(N_redundancy >= 80) %>%
+  filter(Class == "exon" | Class == "intron")
+table(stability_regulons$Condition, stability_regulons$Class)
+```
+
+# Non responders
+```{r}
+nr_stable_genes <- stability_regulons %>% filter(Condition == "non_responder") %>%
+  distinct(Feature) %>%
+  pull(Feature)
+```
+Extract exonic and intronic counts for each NR stable gene
+```{r}
+exons <- sum_per_gene %>% filter(Class == "exon" & Feature %in% nr_stable_genes) %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+introns <- sum_per_gene %>% filter(Class == "intron" & Feature %in% nr_stable_genes) %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+
+all(rownames(exons) == rownames(introns)) # Sanity check
+```
+Compute ratio intron / (intron + exon) for each NR stable gene only if exon and intron counts are both >= @threshold
+```{r}
+threshold <- 20
+ratio_matrix <- matrix(numeric(nrow(exons) * ncol(exons)), nrow = nrow(exons), ncol = ncol(exons))
+for (i in 1:nrow(exons)) {
+  for (j in 1:ncol(exons)) {
+    exon_ij <- exons[i, j]
+    intron_ij <- introns[i, j]
+    
+    if (exon_ij >= threshold | intron_ij >= threshold) {
+      ratio_matrix[i, j] <- intron_ij / (intron_ij + exon_ij)
+    } else {
+      ratio_matrix[i, j] <- NA
+    }
+  }
+}
+rownames(ratio_matrix) <- rownames(exons)
+colnames(ratio_matrix) <- colnames(exons)
+# ratio <- introns / (introns + exons)
+min(ratio_matrix, na.rm = TRUE)
+max(ratio_matrix, na.rm = TRUE)
+sum(is.na(ratio_matrix))
+```
+Compute mean ratio and plot
+```{r}
+mean_ratio <- colMeans(ratio_matrix, na.rm = TRUE) %>% as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+ggplot(mean_ratio, aes(Response, ., fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+
+# Responders
+```{r}
+r_stable_genes <- stability_regulons %>% filter(Condition == "responder") %>%
+  distinct(Feature) %>%
+  pull(Feature)
+```
+Extract exonic and intronic counts for each NR stable gene
+```{r}
+exons <- sum_per_gene %>% filter(Class == "exon" & Feature %in% r_stable_genes) %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+introns <- sum_per_gene %>% filter(Class == "intron" & Feature %in% r_stable_genes) %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature")
+
+all(rownames(exons) == rownames(introns)) # Sanity check
+```
+Compute ratio intron / (intron + exon) for each NR stable gene only if exon and intron counts are both >= @threshold
+```{r}
+threshold <- 20
+ratio_matrix <- matrix(numeric(nrow(exons) * ncol(exons)), nrow = nrow(exons), ncol = ncol(exons))
+for (i in 1:nrow(exons)) {
+  for (j in 1:ncol(exons)) {
+    exon_ij <- exons[i, j]
+    intron_ij <- introns[i, j]
+    
+    if (exon_ij >= threshold | intron_ij >= threshold) {
+      ratio_matrix[i, j] <- intron_ij / (intron_ij + exon_ij)
+    } else {
+      ratio_matrix[i, j] <- NA
+    }
+  }
+}
+rownames(ratio_matrix) <- rownames(exons)
+colnames(ratio_matrix) <- colnames(exons)
+# ratio <- introns / (introns + exons)
+min(ratio_matrix, na.rm = TRUE)
+max(ratio_matrix, na.rm = TRUE)
+sum(is.na(ratio_matrix))
+```
+Compute mean ratio and plot
+```{r}
+mean_ratio <- colMeans(ratio_matrix, na.rm = TRUE) %>% as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+ggplot(mean_ratio, aes(Response, ., fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+
+
+```{r}
+exons <- sum_per_gene %>% filter(Class == "exon") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature") %>%
+  colSums() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+introns <- sum_per_gene %>% filter(Class == "intron") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature") %>%
+  colSums() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+ratio <- introns$. / (introns$. + exons$.)
+ratio2 <- ratio %>% as.data.frame() %>%
+  mutate(Response = design$Response)
+```
+
+```{r}
+mean_ratio <- colMeans(ratio_matrix, na.rm = TRUE) %>% as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+ggplot(ratio2, aes(Response, ., fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+
+# Intron load
+# Sum intronic counts of protein coding genes
+```{r}
+exons <- sum_per_gene %>% filter(Class == "exon") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature") %>%
+  colSums() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+introns <- sum_per_gene %>% filter(Class == "intron") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature") %>%
+  colSums() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+
+ggplot(introns, aes(Response, ., fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+
+### Adjust counts by purity + depth
+```{r}
+adjusted_regulon_counts <- fread("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/regulon_counts_with_annotation_purity_depth_ajusted.tsv")
+```
+```{r}
+adjusted_regulon_counts <- adjusted_regulon_counts[Feature %in% coding_genes, ]
+length(unique(adjusted_regulon_counts$Feature))
+
+adjusted_regulon_counts <- adjusted_regulon_counts %>% group_by(Feature) %>%
+  filter(all(c("exon", "intron") %in% Class))
+length(unique(adjusted_regulon_counts$Feature))
+```
+Sum all regulon per gene and per class
+```{r}
+#regulon_counts2 <- regulon_counts %>% filter(Feature %in% sample(regulon_counts$Feature, 100))
+adjusted_regulon_counts2 <- adjusted_regulon_counts
+
+sum_per_gene <- adjusted_regulon_counts2 %>% group_by(Feature, Class) %>%
+  summarize_at(design$Sample_ID, sum) 
+# row_sum <- rowSums(sum_per_gene[, 3:ncol(sum_per_gene)]) %>% t()
+# sum_per_gene <- sum_per_gene %>% mutate(Row_sum = row_sum)
+
+#min(sum_per_gene$Row_sum)
+```
+Extract exonic and intronic counts for each gene
+```{r}
+exons <- sum_per_gene %>% filter(Class == "exon") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature") %>%
+  colSums() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+introns <- sum_per_gene %>% filter(Class == "intron") %>%
+  select(-Class) %>%
+  arrange(Feature) %>%
+  column_to_rownames("Feature") %>%
+  colSums() %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+```
+```{r}
+ggplot(exons, aes(Response, ., fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("responder" = "#56B4E9", "non_responder" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 6) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+
+### Focus GJA3
+# Ajusted purity + depth
+```{r}
+gja3 <- sum_per_gene %>% filter(Feature == "GJA3") %>%
+  column_to_rownames("Class") %>%
+  select(-Feature) %>%
+  t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID") %>%
+  mutate(Ratio = (intron / (intron + exon))) %>%
+  select(-Sample_ID) %>%
+  pivot_longer(!Response, names_to = "Stat", values_to = "Value") %>%
+  mutate(Response = if_else(Response == "responder", "R", "NR"))
+
+ggplot(gja3, aes(Response, log(Value), fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+  theme_classic() +
+  facet_wrap(~ Stat) +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label.y = 15, label = "p.format", size = 5) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+ggplot(gja3 %>% filter(Stat == "intron"), aes(Response, Value, fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+  theme_classic() +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 5) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+```
+### Focus GJA3
+# Ajusted purity + depth
+```{r}
+top_introns <- c("ACP7", "MS4A13", "PTGER1", "FAM227A", "RHBDL3", "RSPH14")
+all <- data.frame(Response = character(),
+                  Stat = character(),
+                  Value = numeric(),
+                  Gene = character())
+for (i in top_introns) {
+  tmp <- sum_per_gene %>% filter(Feature == i) %>%
+    column_to_rownames("Class") %>%
+    select(-Feature) %>%
+    t_df() %>%
+    rownames_to_column("Sample_ID") %>%
+    inner_join(design, ., by = "Sample_ID") %>%
+    mutate(Ratio = (intron / (intron + exon))) %>%
+    select(-Sample_ID) %>%
+    pivot_longer(!Response, names_to = "Stat", values_to = "Value") %>%
+    mutate(Response = if_else(Response == "responder", "R", "NR")) %>%
+    mutate(Gene = i)
+  
+  all <- all %>% add_row(tmp)
+}
+
+all_plot <- ggplot(all, aes(Response, Value, fill = Response)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.05, fill = "grey99") +
+  scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+  theme_classic() +
+  facet_wrap(Gene ~ Stat, nrow = length(top_introns), scales = "free") +
+  stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 5) +
+  theme(axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        text = element_text(size = 16, color = "black"),
+        strip.text = element_text(size = 16)) +
+  guides(fill = "none")
+ggsave("/mnt/beegfs/scratch/h_herrmann/tmp_regulons_1606/part2/all_plot_exploration_introns_exons_part2.png", all_plot, height = 12)
+# ggplot(tmp %>% filter(Stat == "intron"), aes(Response, Value, fill = Response)) +
+#   geom_violin(trim = FALSE) +
+#   geom_boxplot(width = 0.05, fill = "grey99") +
+#   scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+#   theme_classic() +
+#   stat_compare_means(method = "wilcox.test", label.x = 1.35, label = "p.format", size = 5) +
+#   theme(axis.text.x = element_text(size = 16, color = "black"),
+#         axis.text.y = element_text(size = 16, color = "black"),
+#         text = element_text(size = 16, color = "black"),
+#         strip.text = element_text(size = 16)) +
+#   guides(fill = "none")
+```
+
+```{r}
+x <- regulon_counts2 %>% filter(Regulon == "intron_GJA3_1") %>%
+  ungroup() %>%
+  select(-Regulon, -Class, -Intra_cluster_feature_id, -N, -Feature) %>%
+  t_df() %>%
+  rownames_to_column("Sample_ID") %>%
+  inner_join(design, ., by = "Sample_ID")
+x2 <- x %>% group_by(Response) %>%
+  summarize(Mean = mean(V1))
+```
+

@@ -1,0 +1,40 @@
+
+"""
+@modified: 11/05/22
+@main_dev: Hugues Herrmann
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+BAM_DIR = config["bam_dir"]
+BED = config["bed"]
+SAMPLE_ID = config["sample_ID"]
+OUT_DIR = config["out_dir"]
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        all_distributions = OUT_DIR + "all_distributions.txt"
+
+
+rule get_read_distribution:
+    input:
+        bam = BAM_DIR + "{sample_ID}/{sample_ID}.bam",
+        bed = BED
+    output:
+        distribution = OUT_DIR + "distributions/introns/{sample_ID}_distribution.txt"
+    threads: 1
+    run:
+        shell("read_distribution.py -i {input.bam} \
+        -r {input.bed} \
+        > {output.distribution}")
+
+
+rule merge_all_counts:
+    input:
+        distribution = expand(OUT_DIR + "distributions/introns/{sample_ID}_distribution.txt", sample_ID = SAMPLE_ID)
+    output:
+        all_distributions = OUT_DIR + "all_distributions.txt"
+    run:
+        shell("touch {output.all_distributions}")

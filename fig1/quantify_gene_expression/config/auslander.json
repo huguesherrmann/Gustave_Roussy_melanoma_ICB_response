@@ -1,0 +1,11 @@
+{
+  "output_dir": "/mnt/beegfs/scratch/h_herrmann/kallisto/gide/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/gide/",
+  "cohort": "gide",
+  "r1_suffix": "_1_trimmed.fq.gz",
+  "r2_suffix": "_2_trimmed.fq.gz",
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "kallisto_threads": 2,
+  "sample_ID": []
+}

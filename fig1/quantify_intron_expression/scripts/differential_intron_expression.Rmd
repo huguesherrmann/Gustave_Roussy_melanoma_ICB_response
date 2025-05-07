@@ -1,0 +1,136 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r include=FALSE}
+library(biomaRt)
+library(ggpubr)
+library(circlize)
+library(ComplexHeatmap)
+suppressPackageStartupMessages(library(clusterProfiler))
+suppressPackageStartupMessages(library(GSVA))
+suppressPackageStartupMessages(library(msigdbr))
+library(DESeq2)
+library(tidyverse)
+source("/mnt/beegfs/userdata/h_herrmann/mela_ici_response/analyze_gene_expression/scripts/functions_for_gene_expression_analysis.R")
+
+mart <- "/mnt/beegfs/userdata/h_herrmann/tools_software/R_mart_hsapiens_gene_ensembl/R_mart_hsapiens_gene_ensembl.rds"
+mart <- readRDS(mart)
+```
+
+```{r}
+ambiguous_counts <- read.table("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/ambiguous_counts/ambiguous_counts.tsv", sep = "\t")
+mature_counts <- read.table("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/mature_counts/mature_counts.tsv", sep = "\t")
+nascent_counts <- read.table("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_intron_expression/gr1234/nascent_counts/nascent_counts.tsv", sep = "\t")
+
+annotation <- read_tsv("/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/ensembl_hg38v108_gene_annotation_table.tsv", show_col_types = FALSE)
+pcg <- annotation %>% filter(Class == "protein_coding")
+non_coding <- annotation %>% filter(Class != "protein_coding")
+
+hallmarks <- msigdbr(species = "Homo sapiens", category = "H") %>% 
+  select(gs_name, gene_symbol)
+c1 <- msigdbr(species = "Homo sapiens", category = "C1") %>% 
+  select(gs_name, gene_symbol)
+
+design <- read_tsv("/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv", show_col_types = FALSE) %>%
+   mutate(Response = if_else(Response == "responder", "R", "NR"))
+```
+
+# Expression différentielle des introns
+DESeq2 sur la matrice des nascents en ajustant pour les exons
+```{r}
+alpha <- 0.05
+l2fc <- 0
+form <- "~Response+Batch+Biopsy_site"
+form <- as.formula(form)
+contrast <- c("Response", "R", "NR")
+design <- design %>% mutate(Batch = factor(Batch))
+
+# Get size factors from mature matrix
+mature_counts <- mature_counts[, order(colnames(mature_counts))]
+design <- design[order(design$Sample_ID), ]
+dds <- DESeqDataSetFromMatrix(countData = mature_counts, 
+                             colData = design, 
+                             design = form) 
+keep <- rowSums(counts(dds)) >= 100
+dds <- dds[keep, ]
+mature_size_factors <- estimateSizeFactors(dds)$sizeFactor
+
+# DESeq2 on nascent matrix
+nascent_counts <- nascent_counts[, order(colnames(nascent_counts))]
+design <- design[order(design$Sample_ID), ]
+dds <- DESeqDataSetFromMatrix(countData = nascent_counts, 
+                             colData = design, 
+                             design = form)
+keep <- rowSums(counts(dds)) >= 100
+dds <- dds[keep, ]
+dds$sizeFactor <- mature_size_factors
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds)
+res <- results(dds, contrast = contrast, lfcThreshold = l2fc, alpha = alpha)
+res_df <- filter_DEG(res, alpha, l2fc, mart) %>% mutate(Expression = if_else(log2FoldChange < 0, "NR", "R")) %>%
+   inner_join(., annotation %>% select(Geneid, Class), by = c("ensembl_gene_id" = "Geneid"))
+
+table(res_df$padj <= 0.05, res_df$Expression)
+```
+2603 DE
+
+```{r}
+table(res_df$Expression, res_df$Class)
+```
+Tendance faible d'introns différentiels chez les NR de gènes non-codants
+Egalement une tendance faible d'expression d'introns chez les R dans les gènes d'IG et de TCR
+A priori pad de diff dans le codant
+
+```{r}
+sorted_vector <- get_sorted_vector(res_df, "log2FoldChange", "hgnc_symbol")
+hallmark_gsea <- perform_gsea(sorted_vector, hallmarks, pval_cutoff = alpha) %>%
+  mutate(Condition = factor(if_else(NES > 0, "R", "NR"))) %>% 
+  mutate(Cohort = "GR1234_introns") %>% 
+  arrange(NES) %>%
+  mutate(ID = str_remove(ID, "HALLMARK_")) %>%
+  mutate(ID = factor(ID, levels = ID))
+
+ggplot(hallmark_gsea, aes(Cohort, ID, fill = Condition, size = abs(NES))) +
+  geom_point(shape = 21) +
+  scale_size_continuous(range = c(4, 8), breaks = seq(0, 3, 1)) +
+  scale_x_discrete(position = "top") +
+  scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+  theme_classic() +
+  theme(legend.position = "bottom", legend.box = "vertical", legend.margin = margin(), axis.text.x = element_text(size = 15, color = "black"), 
+        axis.text.y = element_text(size = 15, color = "black"), legend.text = element_text(size = 15, color = "black"), 
+        legend.title = element_text(size = 15, color = "black")) +
+  guides(size = guide_legend(title = "Score")) +
+  labs(fill = "Association:", x = NULL, y = NULL)
+
+
+positional_gsea <- perform_gsea(sorted_vector, c1, pval_cutoff = alpha) %>%
+  mutate(Condition = factor(if_else(NES > 0, "R", "NR"))) %>% 
+  mutate(Cohort = "GR1234_introns") %>% 
+  arrange(NES) %>%
+  mutate(ID = str_remove(ID, "HALLMARK_")) %>%
+  mutate(ID = factor(ID, levels = ID))
+
+ggplot(positional_gsea, aes(Cohort, ID, fill = Condition, size = abs(NES))) +
+  geom_point(shape = 21) +
+  scale_size_continuous(range = c(4, 8), breaks = seq(0, 3, 1)) +
+  scale_x_discrete(position = "top") +
+  scale_fill_manual(values = c("R" = "#56B4E9", "NR" = "#FF9999")) +
+  theme_classic() +
+  theme(legend.position = "bottom", legend.box = "vertical", legend.margin = margin(), axis.text.x = element_text(size = 15, color = "black"), 
+        axis.text.y = element_text(size = 15, color = "black"), legend.text = element_text(size = 15, color = "black"), 
+        legend.title = element_text(size = 15, color = "black")) +
+  guides(size = guide_legend(title = "Score")) +
+  labs(fill = "Association:", x = NULL, y = NULL)
+```
+Transcription plus active chez les R ?
+Les 2 features positionelles sont également up chez les R lors d'une analyse différentielle sur les exons
+
+```{r}
+deg <- read_tsv("/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/gr1234/DEG/coding_deg.tsv", show_col_types = FALSE)
+
+length(intersect(res_df$ensembl_gene_id, deg$ensembl_gene_id))
+length(intersect(res_df$ensembl_gene_id, deg$ensembl_gene_id)) / length(res_df$ensembl_gene_id)
+```
+

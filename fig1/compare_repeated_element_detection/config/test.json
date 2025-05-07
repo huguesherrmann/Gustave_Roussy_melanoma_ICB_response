@@ -1,0 +1,14 @@
+{
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_repeated_element_detection/test/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/test/",
+  "r1_suffix": "_1.fastq.gz",
+  "r2_suffix": "_1.fastq.gz",
+
+  "n_read_sampled": [100000, 500000],
+  "threads": 6,
+
+  "salmon_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/REdiscoverTE_index",
+  "rediscoverte_annotation" : "/mnt/beegfs/userdata/h_herrmann/tools_software/REdiscoverTE/original/REdiscoverTE/rollup_annotation/",
+
+  "sample_ID": ["SRR10841921", "SRR10900547"],
+}

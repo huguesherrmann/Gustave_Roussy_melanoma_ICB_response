@@ -1,0 +1,140 @@
+"""
+@modified: 18/06/22
+@main_dev: Hugues Herrmann
+Execute REdiscoverTE
+"""
+
+import os
+import sys
+
+### ========== Variables ========== ###
+SALMON = "/mnt/beegfs/userdata/h_herrmann/tools_software/salmon-1.8.0_linux_x86_64/bin/salmon"
+
+RESULTS_DIR = config["results_dir"]
+LOG_DIR = RESULTS_DIR + "logs/"
+FASTQ_DIR = config["fastq_dir"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+
+SALMON_THREADS = config["salmon_threads"]
+REDISCOVERTE_TRANSCRIPTOME = config["rediscoverte_transcriptome"]
+REDISCOVERTE_ANNOTATION = config["rediscoverte_annotation"]
+
+ALL_SAMPLE_ID = config["all_sample_id"]
+
+
+### ========== Functions ========== ###
+def check_sample_fastq_in_directory(fastq_dir, sample_ID_list) -> list:
+    # Check if all sample ID have a corresponding fastq and return the list of fastq
+    # If a sample ID is not associated to fastq ; ends up snakemake
+    # @fastq_dir:       a string, path to the directory containing all fastq
+    # @sample_ID_list:  a list, list of all sample_ID to process
+    index_sample_name = 0
+    fastq_basename_list = []
+    missing_fastq = []
+
+    fastq_file_list = os.listdir(fastq_dir)
+    num_file_in_dir = len(fastq_file_list)
+
+    for fastq in fastq_file_list:
+        sample_name = fastq.split("_")[index_sample_name]
+        if sample_name not in fastq_basename_list:
+            fastq_basename_list.append(sample_name)
+
+    total_intersection = all(sample in fastq_basename_list for sample in sample_ID_list)
+
+    if (total_intersection):
+        return(fastq_file_list)        
+    else:
+        missing_fastq = list(set(sample_ID_list) - set(fastq_basename_list))
+
+        print("Fastq associated to these sample ID are missing:", missing_fastq)
+        sys.exit()
+
+
+### ========== Generate input lists ========== ###
+sample_fastq_in_directory_list = check_sample_fastq_in_directory(FASTQ_DIR, ALL_SAMPLE_ID)
+sample_fastq_in_directory_list = [FASTQ_DIR + fastq for fastq in sample_fastq_in_directory_list]
+
+
+### ========== Rules ========== ###
+
+rule all :
+    input : 
+        all_repetitive_elements = RESULTS_DIR + "RE_all_2_counts_normalized.RDS",    
+        exon_repetitive_elements = RESULTS_DIR + "RE_exon_2_counts_normalized.RDS",
+        intron_repetitive_elements = RESULTS_DIR + "RE_intron_2_counts_normalized.RDS",
+        intergenic_repetitive_elements = RESULTS_DIR + "RE_intergenic_2_counts_normalized.RDS"
+
+
+rule salmon_index:
+    input:
+        REdiscoverTE_transcriptome = REDISCOVERTE_TRANSCRIPTOME
+    output:
+        REdiscoverTE_idx = RESULTS_DIR + "REdiscoverTE/REdiscoverTE_index/pos.bin"
+    params:
+        salmon = SALMON,
+        index_dir = RESULTS_DIR + "REdiscoverTE/REdiscoverTE_index"
+    threads:
+        SALMON_THREADS
+    log:
+        LOG_DIR + "salmon_index_RE_discoverTE.log"
+    run:
+        shell("{params.salmon} index -t {input} \
+        --threads {threads} \
+        -i {params.index_dir} 2>> {log}")
+
+
+rule salmon_quant:
+    input:
+        REdiscoverTE_idx = RESULTS_DIR + "REdiscoverTE/REdiscoverTE_index/pos.bin",
+        fastq_1 = FASTQ_DIR + "{sample_ID}" + R1_SUFFIX,
+        fastq_2 = FASTQ_DIR + "{sample_ID}" + R2_SUFFIX
+    output:
+        salmon_out = RESULTS_DIR + "quant/{sample_ID}/quant.sf.gz",
+    params:
+        salmon = SALMON,
+        results_dir = RESULTS_DIR + "quant/",
+        index_dir = RESULTS_DIR + "REdiscoverTE/REdiscoverTE_index",
+        metadata = RESULTS_DIR + "metadata.tsv", #METADATA_FILE,
+        lib_type = "A"
+    threads: SALMON_THREADS
+    run:
+        shell("{params.salmon} quant --index {params.index_dir} \
+        --libType {params.lib_type} \
+        -1 {input.fastq_1} \
+        -2 {input.fastq_2} \
+        -o {params.results_dir}{wildcards.sample_ID} \
+        --validateMappings \
+        --seqBias \
+        --gcBias \
+        --threads {threads} \
+        --quiet")
+        shell("gzip {params.results_dir}{wildcards.sample_ID}/quant.sf")
+        shell("echo -e '{wildcards.sample_ID}\t{output.salmon_out}' >> {params.metadata}")
+        shell("rm {params.results_dir}{wildcards.sample_ID}/*.json")
+        shell("rm -r {params.results_dir}{wildcards.sample_ID}/libParams")
+        shell("rm -r {params.results_dir}{wildcards.sample_ID}/logs")
+        shell("rm -r {params.results_dir}{wildcards.sample_ID}/aux_info")
+
+
+rule annotate_repeats:
+    input:
+        salmon_out = expand(RESULTS_DIR + "quant/{sample_ID}/quant.sf.gz", sample_ID = ALL_SAMPLE_ID),
+    output:
+        all_repetitive_elements = RESULTS_DIR + "RE_all_2_counts_normalized.RDS",    
+        exon_repetitive_elements = RESULTS_DIR + "RE_exon_2_counts_normalized.RDS",
+        intron_repetitive_elements = RESULTS_DIR + "RE_intron_2_counts_normalized.RDS",
+        intergenic_repetitive_elements = RESULTS_DIR + "RE_intergenic_2_counts_normalized.RDS"
+    params:
+        metadata = RESULTS_DIR + "metadata.tsv",
+        annotation_dir = REDISCOVERTE_ANNOTATION,
+        output_dir = RESULTS_DIR
+    run:
+        shell("sed -i '1i sample\tquant_sf_path' {params.metadata}")
+        shell("Rscript scripts/rollup.R --metadata={metadata} \
+        --datadir {annotation_dir} \
+        --nozero \
+        --assembly=hg38 \
+        --outdir={output_dir}".format(metadata = params.metadata, annotation_dir = params.annotation_dir, output_dir = params.output_dir))
+        shell("rm -r {quant_dir}".format(quant_dir = RESULTS_DIR + "quant/"))

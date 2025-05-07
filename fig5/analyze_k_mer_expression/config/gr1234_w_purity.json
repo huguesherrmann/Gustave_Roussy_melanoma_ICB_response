@@ -1,0 +1,14 @@
+{
+  "gtf": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v42_primary_assembly_annotation.gtf.gz",
+  "design": "/mnt/beegfs/userdata/h_herrmann/design/gr1234/baseline_curated_design_gr1234.tsv",
+  "counts": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_w_purity/regulons/all_regulon_counts.tsv",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_w_purity/regulons/all_regulons_annotated.tsv",
+  "differential": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_w_purity/stability/differential_regulons.tsv",
+  "metabam": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/make_metabam/gr1234/metabam_non_responders/metabam_non_responders_200m.bam",
+  "correspondence": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/get_stable_features_in_k_mer_matrix/gr1234_w_purity/regulons/all_correspondence_contigs_regulons.tsv",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_k_mer_expression/test/",
+  "lib_type": "fr-firststrand",
+  "distance": 200,
+  "threads": 1
+}
+

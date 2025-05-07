@@ -1,0 +1,15 @@
+{
+  "work_dir": "/mnt/beegfs/scratch/h_herrmann/kallisto/mgh/",
+  "output_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/mgh/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/mgh/",
+  "cohort": "mgh",
+  "r1_suffix": "_1_trimmed.fq.gz",
+  "r2_suffix": "_2_trimmed.fq.gz",
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "kallisto_threads": 2,
+  "sample_ID": ["SRR7344544", "SRR7344546", "SRR7344548", "SRR7344550", "SRR7344552", "SRR7344554", 
+"SRR7344556", "SRR7344559", "SRR7344561", "SRR7344564", "SRR7344565", "SRR7344567", 
+"SRR7344574", "SRR7344575", "SRR13853353", "SRR13853355", "SRR13853358", "SRR13853359",
+"SRR13853366", "SRR13853368", "SRR13853370", "SRR13853372", "SRR13853375", "SRR13853377"]
+}

@@ -1,0 +1,168 @@
+"""
+@modified: 02/08/24
+@main_dev: Hugues Herrmann
+Generate exon and intron matrices.
+"""
+
+import csv
+
+
+### ========== Variables ========== ###
+# Mandatory
+INTRON_INDEX_DIR = config["intron_index_dir"]
+BIND_DIR = config["bind_dir"]
+OUT_DIR = config["out_dir"]
+FASTQ_DIR = config["fastq_dir"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+SAMPLE_ID = config["sample_ID"]
+
+# Optional
+THREADS = config["threads"] if "threads" in config else 1
+MEMORY = config["memory"] if "memory" in config else "2G"
+
+# Software
+KB_IMG = "/mnt/beegfs/userdata/h_herrmann/tools_software/kb_python.sif"
+
+
+### ========== COMMON ========== ###
+FASTQ_FILES = []
+SAMPLES = []
+for sample in SAMPLE_ID:
+    r1 = FASTQ_DIR + sample + R1_SUFFIX
+    r2 = FASTQ_DIR + sample + R2_SUFFIX
+    FASTQ_FILES.append(r1)
+    FASTQ_FILES.append(r2)
+    SAMPLES.append(sample)
+
+PAIRED_FASTQ_FILES = ' '.join(FASTQ_FILES)
+
+# kb quant-tcc renames sample_ID as sample_1, sample_2, etc. A correspondance file is made to link the "new" names to the originals
+if not os.path.exists(OUT_DIR):
+    os.makedirs(OUT_DIR)
+with open(OUT_DIR + "correspondance.csv", mode = 'w', newline = '') as file:
+    writer = csv.writer(file)
+    writer.writerow(["Sample_name", "Sample_ID"])
+    for i, row in enumerate(SAMPLES, start = 1):
+        # Add the iterator as 'abundance_1', 'abundance_2', etc.
+        new_row = [f'abundance_{i}']
+        new_row.append(row)
+        writer.writerow(new_row)
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        #mature_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.mature.mtx",
+        #nascent_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.nascent.mtx"
+        mature_abundance = OUT_DIR + "mature_counts/matrix.abundance.gene.mtx",
+        nascent_abundance = OUT_DIR + "nascent_counts/matrix.abundance.gene.mtx",
+        ambiguous_abundance = OUT_DIR + "ambiguous_counts/matrix.abundance.gene.mtx"
+
+
+#rule kb_download_index:
+#    input:
+#        genome = GENOME,
+#        gtf = GTF
+#    output:
+#        index = INTRON_INDEX_DIR + "index.idx"
+#    params:
+#        intron_index_dir = INTRON_INDEX_DIR,
+#        work_dir = WORK_DIR
+#        kb_img = KB_IMG,
+#    threads: THREADS
+#    run:
+#        shell("singularity exec -B {params.work_dir} kb ref --workflow=nac \
+#        -d human \
+#        -i {params.intron_index_dir}index.idx \
+#        -g {params.intron_index_dir}t2g.txt \
+#        -c1 {params.intron_index_dir}cdna.txt \
+#        -c2 {params.intron_index_dir}nascent.txt")
+
+rule kb_count:
+    input:
+        intron_index_dir = INTRON_INDEX_DIR,
+        r1 = expand(FASTQ_DIR + "{sample_ID}" + R1_SUFFIX, sample_ID = SAMPLE_ID),
+        r2 = expand(FASTQ_DIR + "{sample_ID}" + R2_SUFFIX, sample_ID = SAMPLE_ID)
+    output:
+        mature_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.mature.mtx",
+        nascent_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.nascent.mtx",
+        ambiguous_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.ambiguous.mtx"
+    params:
+        paired_fastq = PAIRED_FASTQ_FILES,
+        bind_dir = BIND_DIR,
+        out_dir = OUT_DIR + "quantification/",
+        index = INTRON_INDEX_DIR + "index.idx",
+        transcripts = INTRON_INDEX_DIR + "t2g.txt",
+        cdna = INTRON_INDEX_DIR + "cdna.txt",
+        intron = INTRON_INDEX_DIR + "nascent.txt",
+        threads = THREADS,
+        memory = MEMORY,
+        kb_img = KB_IMG 
+    threads: THREADS
+    run:
+        shell("singularity exec -B {params.bind_dir} {params.kb_img} \
+        kb count --workflow=nac \
+        -x BULK \
+        -o {params.out_dir} \
+        -i {params.index} \
+        -g {params.transcripts} \
+        -c1 {params.cdna} \
+        -c2 {params.intron} \
+        --parity=paired \
+        -w NONE \
+        --tcc \
+        -t {params.threads} \
+        -m {params.memory} \
+        {params.paired_fastq}")
+
+rule kb_quant_tcc:
+    input:
+        mature_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.mature.mtx",
+        nascent_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.nascent.mtx",
+        ambiguous_mtx = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.ambiguous.mtx"
+    output:
+        mature_abundance = OUT_DIR + "mature_counts/matrix.abundance.gene.mtx",
+        nascent_abundance = OUT_DIR + "nascent_counts/matrix.abundance.gene.mtx",
+        ambiguous_abundance = OUT_DIR + "ambiguous_counts/matrix.abundance.gene.mtx"
+    params:
+        bind_dir = BIND_DIR,
+        out_dir = OUT_DIR,
+        index = INTRON_INDEX_DIR + "index.idx",
+        transcripts = INTRON_INDEX_DIR + "t2g.txt",
+        flens = OUT_DIR + "quantification/flens.txt",
+        ec = OUT_DIR + "quantification/counts_unfiltered/cells_x_tcc.ec.txt", 
+        threads = THREADS,
+        kb_img = KB_IMG
+    threads: THREADS
+    run:
+        shell("singularity exec -B {params.bind_dir} {params.kb_img} /usr/local/lib/python3.12/site-packages/kb_python/bins/linux/kallisto/kallisto quant-tcc \
+        -t {params.threads} \
+        --matrix-to-directories \
+        --plaintext \
+        -o {params.out_dir}mature_counts/ \
+        -i {params.index} \
+        -g {params.transcripts} \
+        -f {params.flens} \
+        -e {params.ec} \
+        {input.mature_mtx}")
+        shell("singularity exec -B {params.bind_dir} {params.kb_img} /usr/local/lib/python3.12/site-packages/kb_python/bins/linux/kallisto/kallisto quant-tcc \
+        -t {params.threads} \
+        --matrix-to-directories \
+        --plaintext \
+        -o {params.out_dir}nascent_counts/ \
+        -i {params.index} \
+        -g {params.transcripts} \
+        -f {params.flens} \
+        -e {params.ec} \
+        {input.nascent_mtx}")
+        shell("singularity exec -B {params.bind_dir} {params.kb_img} /usr/local/lib/python3.12/site-packages/kb_python/bins/linux/kallisto/kallisto quant-tcc \
+        -t {params.threads} \
+        --matrix-to-directories \
+        --plaintext \
+        -o {params.out_dir}ambiguous_counts/ \
+        -i {params.index} \
+        -g {params.transcripts} \
+        -f {params.flens} \
+        -e {params.ec} \
+        {input.ambiguous_mtx}")

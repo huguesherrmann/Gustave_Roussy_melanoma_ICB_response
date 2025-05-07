@@ -1,0 +1,166 @@
+"""
+@modified: 14/05/24
+@main_dev: Hugues Herrmann
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+COUNTS = config["counts"]
+ANNOTATION = config ["annotation"]
+DESIGN = config["design"]
+INDICE_DIR = config["indice_dir"]
+OUT_DIR = config["out_dir"]
+
+# Optional
+DISTANCE = config["distance"] if "distance" in config else 1000
+CORRELATION = config["correlation"] if "correlation" in config else 0.6
+THREADS = config["threads"] if "threads" in config else 1
+VERBOSE = config["verbose"] if "verbose" in config else FALSE
+OPERATION = config["operation"] if "operation" in config else "sum"
+L2FC = config["l2fc"] if "l2fc" in config else 0
+ALPHA_DE = config["alpha_de"] if "alpha_de" in config else 0.05
+N_TOP = config["n_top"] if "n_top" in config else 16
+K_UNMAPPED = config["k_unmapped"] if "k_unmapped" in config else 100
+K_CHIMERIC = config["k_chimeric"] if "k_chimeric" in config else 5
+TUMOR_PURITY = config["tumor_purity"] if "tumor_purity" in config else "FALSE"
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        #radar_plot = OUT_DIR + "describe_contig_population/contig_biotype_counts.png",
+        regulon_counts = OUT_DIR + "regulons/all_regulon_counts.tsv",
+        correspondence = OUT_DIR + "regulons/all_correspondence_contigs_regulons.tsv",
+        top_stable_regulons = OUT_DIR + "stability/l2fc_top_stable_regulons.png"
+
+
+#rule describe_contig_population:
+#    input: 
+#        annotation = ANNOTATION
+#    output:
+#        radar_plot = OUT_DIR + "describe_contig_population/contig_biotype_counts.png",
+#        contig_size_plot = OUT_DIR + "describe_contig_population/contig_size_histogram.png"
+#    params:
+#        out_dir = OUT_DIR
+#    run:
+#        shell("Rscript scripts/a_describe_contig_population.R --annotation {input.annotation} \
+#        --out_dir {params.out_dir}")
+
+rule get_intergenics_to_connect:
+    input:
+        annotation = ANNOTATION
+    output:
+        intergenics_to_connect = OUT_DIR + "subgraphs/intergenics_to_connect.txt"
+    params:
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/b_get_intergenics_to_connect.R --annotation {input.annotation} \
+        --out_dir {params.out_dir}")
+
+rule get_subgraphs:
+    input:
+        intergenics_to_connect = OUT_DIR + "subgraphs/intergenics_to_connect.txt"
+    output:
+        connected_intergenics = OUT_DIR + "subgraphs/connected_intergenics.txt"
+    params:
+        distance = DISTANCE
+    run:
+        shell("python3 scripts/c_get_subgraphs.py --input {input.intergenics_to_connect} \
+        --output {output.connected_intergenics} \
+        --distance {params.distance}")
+
+rule make_regulons:
+    input:
+        annotation = ANNOTATION,
+        counts = COUNTS,
+        design = DESIGN,
+        connected_intergenics = OUT_DIR + "subgraphs/connected_intergenics.txt"
+    output:
+        exon_regulons = OUT_DIR + "regulons/exon_regulons.tsv",
+        intron_regulons = OUT_DIR + "regulons/intron_regulons.tsv",
+        repeat_regulons = OUT_DIR + "regulons/repeat_regulons.tsv",
+        intergenic_regulons = OUT_DIR + "regulons/intergenic_regulons.tsv"
+    params:
+        out_dir = OUT_DIR + "regulons/",
+        correlation = CORRELATION,
+        threads = THREADS,
+        k_centers_unmapped = K_UNMAPPED,
+        k_centers_chimeric = K_CHIMERIC,
+        verbose = VERBOSE
+    threads: THREADS
+    run:
+        shell("Rscript scripts/d_make_regulons.R --counts {input.counts} \
+        --design {input.design} \
+        --annotation {input.annotation} \
+        --intergenic_regions {input.connected_intergenics} \
+        --out_dir {params.out_dir} \
+        --correlation {params.correlation} \
+        --threads {params.threads} \
+        --k_centers_unmapped {params.k_centers_unmapped} \
+        --k_centers_chimeric {params.k_centers_chimeric} \
+        --verbose {params.verbose}")
+
+rule aggregate_counts_per_regulon:
+    input:
+        counts = COUNTS,
+        annotation = ANNOTATION,
+        design = DESIGN,
+        connected_intergenics = OUT_DIR + "subgraphs/connected_intergenics.txt",
+        exon_regulons = OUT_DIR + "regulons/exon_regulons.tsv",
+        intron_regulons = OUT_DIR + "regulons/intron_regulons.tsv",
+        repeat_regulons = OUT_DIR + "regulons/repeat_regulons.tsv",
+        intergenic_regulons = OUT_DIR + "regulons/intergenic_regulons.tsv"
+    output:
+        regulon_counts = OUT_DIR + "regulons/all_regulon_counts.tsv",
+        correspondence = OUT_DIR + "regulons/all_correspondence_contigs_regulons.tsv"
+    params:
+        out_dir = OUT_DIR,
+        operation = OPERATION
+    run:
+        shell("Rscript scripts/e_aggregate_counts_per_regulon.R --counts {input.counts} \
+        --design {input.design} \
+        --annotation {input.annotation} \
+        --intergenic_regions {input.connected_intergenics} \
+        --out_dir {params.out_dir} \
+        --operation {params.operation}")
+
+rule perform_differential_analysis:
+    input:
+        regulon_counts = OUT_DIR + "regulons/all_regulon_counts.tsv",
+        correspondence = OUT_DIR + "regulons/all_correspondence_contigs_regulons.tsv",
+        design = DESIGN,
+        indice_dir = INDICE_DIR
+    output:
+        differential_regulons = OUT_DIR + "stability/differential_regulons.tsv"
+    params:
+        l2fc = L2FC,
+        alpha_de = ALPHA_DE,
+        out_dir = OUT_DIR,
+        tumor_purity = TUMOR_PURITY,
+        threads = THREADS
+    threads : THREADS
+    run:
+        shell("Rscript scripts/f_perform_regulons_differential_analysis.R --regulons {input.regulon_counts} \
+        --correspondence {input.correspondence} \
+        --design {input.design} \
+        --indice_dir {input.indice_dir} \
+        --out_dir {params.out_dir} \
+        --l2fc {params.l2fc} \
+        --alpha {params.alpha_de} \
+        --tumor_purity {params.tumor_purity} \
+        --threads {params.threads}")
+
+rule plot_stable_regulons:
+    input:
+        differential_regulons = OUT_DIR + "stability/differential_regulons.tsv",
+        correspondence = OUT_DIR + "regulons/all_correspondence_contigs_regulons.tsv"
+    output:
+        top_stable_regulons = OUT_DIR + "stability/l2fc_top_stable_regulons.png"
+    params:
+        n_top = N_TOP,
+        out_dir = OUT_DIR
+    run:        
+        shell("Rscript scripts/g_plot_stable_regulons.R --regulons {input.differential_regulons} \
+        --correspondence {input.correspondence} \
+        --out_dir {params.out_dir} \
+        --n_top {params.n_top}")

@@ -1,0 +1,14 @@
+{
+  "counts": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/riaz/gene_counts_riaz.tsv",
+  "tpm": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/quantify_gene_expression/riaz/scaled_tpm_gene_counts_riaz.tsv",
+  "design": "/mnt/beegfs/userdata/h_herrmann/design/riaz/baseline_curated_design_riaz.tsv",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/results_and_data/gene_level_analysis/annot_lookup.tsv",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_gene_expression/riaz/",
+  "cohort": "riaz",
+  "mart": "/mnt/beegfs/userdata/h_herrmann/tools_software/R_mart_hsapiens_gene_ensembl/R_mart_hsapiens_gene_ensembl.rds",
+  "log2FC": 0,
+  "alpha_deg": 0.05,
+  "alpha_gsea": 0.05,
+  "tumor_purity": "FALSE"
+}
+

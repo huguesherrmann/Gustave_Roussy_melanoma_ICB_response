@@ -1,0 +1,146 @@
+"""
+@modified: 14/06/24
+@main_dev: Hugues Herrmann
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+DIFFERENTIAL = config["differential"]
+ANNOTATION = config["annotation"]
+COUNTS = config["counts"]
+GTF = config["gtf"]
+METABAM = config["metabam"]
+CORRESPONDENCE = config["correspondence"]
+LIB_TYPE = config["lib_type"]
+DESIGN = config["design"]
+OUT_DIR = config["out_dir"]
+
+# Optional
+ALPHA = config["alpha"] if "alpha" in config else 0.05
+THREADS = config["threads"] if "threads" in config else 1
+DISTANCE = config["distance"] if "distance" in config else 200
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        definitive_differential = OUT_DIR + "definitive_differential/filtered_differential_regulons.tsv",
+        intergenic_and_ALR_sequences = OUT_DIR + "sequences/NR_ALR_sequences.fa",
+        length_region = OUT_DIR + "descriptive_stats/length_regions.pdf",
+        all_burdens = OUT_DIR + "intergenic_and_ALR_burdens/intergenic_and_ALR_burdens.tsv"
+    
+
+rule prepare_intergenic_contig_table:
+    input:
+        differential = DIFFERENTIAL,
+        annotation = ANNOTATION
+    output:
+        intergenic_table = OUT_DIR + "orientation/all_intergenic_table.tsv"
+    params:
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/01_prepare_intergenic_contig_table_to_infer_orientation.R --differential {input.differential} \
+        --annotation {input.annotation} \
+        --out_dir {params.out_dir}")
+
+rule get_intergenic_strand_counts:
+    input:
+        metabam = METABAM,
+        intergenic_table = OUT_DIR + "orientation/all_intergenic_table.tsv"
+    output:
+        counts = OUT_DIR + "orientation/direct_and_indirect_kmer_counts_annotated.tsv.gz"
+    params:
+        out_dir = OUT_DIR + "orientation/",
+        threads = THREADS,
+        lib_type = LIB_TYPE
+    threads: THREADS
+    run:
+        shell("bash scripts/02_get_intergenic_strand_counts.sh -b {input.metabam} \
+        -k {input.intergenic_table} \
+        -o {params.out_dir} \
+        -l {params.lib_type} \
+        -t {params.threads} \
+        -f 1")
+        shell("gzip {params.out_dir}direct_and_indirect_kmer_counts_annotated.tsv")
+        shell("rm {params.out_dir}direct_and_indirect_kmer_counts_annotated.fa")
+        shell("rm {params.out_dir}direct_and_indirect_kmer_counts.tsv")
+        shell("rm {params.out_dir}matching*")
+        shell("rm {params.out_dir}merged*")
+        shell("rm {params.out_dir}minus*")
+        shell("rm {params.out_dir}plus*")
+        shell("rm {params.out_dir}query*")
+
+rule infer_orientation:
+    input:
+        intergenic_table = OUT_DIR + "orientation/all_intergenic_table.tsv",
+        counts = OUT_DIR + "orientation/direct_and_indirect_kmer_counts_annotated.tsv.gz"
+    output:
+        orientation = OUT_DIR + "orientation/predicted_intergenic_region_orientation.tsv"
+    params:
+        out_dir = OUT_DIR,
+    run:
+        shell("Rscript scripts/03_infer_orientation.R --intergenics {input.intergenic_table} \
+        --counts {input.counts} \
+        --out_dir {params.out_dir}")
+
+rule filter_out_non_intergenic_regions:
+    input:
+        correspondence = CORRESPONDENCE,
+        gtf = GTF,
+        orientation = OUT_DIR + "orientation/predicted_intergenic_region_orientation.tsv",
+        differential = DIFFERENTIAL
+    output:
+        definitive_differential = OUT_DIR + "definitive_differential/filtered_differential_regulons.tsv"
+    params:
+        distance = DISTANCE,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/04_filter_out_non_intergenic_regions.R --gtf {input.gtf} \
+        --correspondence {input.correspondence} \
+        --differential {input.differential} \
+        --orientation {input.orientation} \
+        --distance {params.distance} \
+        --out_dir {params.out_dir}")
+
+rule plot_functional_and_descriptive_stats:
+    input:
+        definitive_differential = OUT_DIR + "definitive_differential/filtered_differential_regulons.tsv"
+    output:
+        length_region = OUT_DIR + "descriptive_stats/length_regions.pdf"
+    params:
+        alpha = ALPHA,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/05_compute_functional_and_descriptive_stats_about_intergenic_regions.R --differential {input.definitive_differential} \
+        --alpha {params.alpha} \
+        --out_dir {params.out_dir}")
+
+rule get_intergenic_and_ALR_burdens:
+    input:
+        definitive_differential = OUT_DIR + "definitive_differential/filtered_differential_regulons.tsv",
+        counts = COUNTS,
+        design = DESIGN
+    output:
+        all_burdens = OUT_DIR + "intergenic_and_ALR_burdens/intergenic_and_ALR_burdens.tsv"
+    params:
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/06_get_intergenic_and_ALR_burdens.R --regulon_counts {input.counts} \
+        --differential {input.definitive_differential} \
+        --design {input.design} \
+        --out_dir {params.out_dir}")
+
+rule get_intergenic_and_ALR_annotations_and_sequences:
+    input:
+        definitive_differential = OUT_DIR + "definitive_differential/filtered_differential_regulons.tsv",
+        annotation = ANNOTATION,
+        correspondence = CORRESPONDENCE
+    output:
+        intergenic_and_ALR_sequences = OUT_DIR + "sequences/NR_ALR_sequences.fa"
+    params:
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/07_get_intergenic_and_ALR_annotations_and_sequences.R --annotation {input.annotation} \
+        --correspondence {input.correspondence} \
+        --differential {input.definitive_differential} \
+        --out_dir {params.out_dir}")

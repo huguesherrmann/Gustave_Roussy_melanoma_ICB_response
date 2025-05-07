@@ -1,0 +1,204 @@
+"""
+@modified: 11/09/24
+@main_dev: Hugues Herrmann
+"""
+
+### ========== Variables ========== ###
+# Mandatory
+CUTNTAG_BAM_DIR = config["cutntag_bam_dir"]
+QUANTIF_BAM_DIR = config["quantif_bam_dir"]
+SAMPLE_ID = config["sample_ID"]
+N_READS = config["n_reads"]
+MARK = config["mark"]
+OUT_DIR = config["out_dir"]
+THREADS = config["threads"] if "threads" in config else 1
+GENOME_SIZE = 2913022398 # https://deeptools.readthedocs.io/en/latest/content/feature/effectiveGenomeSize.html
+BIN_SIZE = config["bin_size"] if "bin_size" in config else 50
+#SMOOTH = config["smooth"] if "smooth" in config else 100
+NORM_METHOD = config["norm_method"] if "norm_method" in config else "None"
+METADATA = config["metadata"]
+OFFSET_TSS_PLOT = config["offset_tss_plot"] if "offset_tss_plot" in config else 5000
+OFFSET_TSS_SIGNAL = config["offset_tss_signal"] if "offset_tss_signal" in config else 2000
+OFFSET_TSS_NOISE = config["offset_tss_noise"] if "offset_tss_noise" in config else 100
+OFFSET_QUANTIF = config["offset_quantif"] if "offset_quantif" in config else 1000
+THRESHOLD_EXPRESSION = config["threshold_expression"] if "threshold_expression" in config else 10
+
+# List of all bam for quantification
+tmp_quantif_bams = []
+for sample in SAMPLE_ID:
+    bam = QUANTIF_BAM_DIR + sample + "/" + sample + ".bam"
+    tmp_quantif_bams.append(bam)
+quantif_bams = ' '.join(tmp_quantif_bams)
+
+
+### ========== Rules ========== ###
+rule all:
+    input:
+        bw = expand(OUT_DIR + "bw/" + MARK + "/{sample_ID}_" + MARK + ".bw", sample_ID = SAMPLE_ID),
+        plot = OUT_DIR + "plots/" + MARK + "/tss_enrichment.pdf",
+        read_counts_expression_signal = expand(OUT_DIR + "featureCounts/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_signal.txt", sample_ID = SAMPLE_ID),
+        quantif_tss = OUT_DIR + "featureCounts/" + MARK + "/quantif_tss_regions.txt"
+
+
+rule bam_to_bigwig:
+    input:
+        cutntag_bam = CUTNTAG_BAM_DIR + MARK + "/{sample_ID}_" + MARK + ".sorted.bam",
+        cutntag_bam_bai = CUTNTAG_BAM_DIR + MARK + "/{sample_ID}_" + MARK + ".sorted.bam.bai"
+    output:
+        bw = OUT_DIR + "bw/" + MARK + "/{sample_ID}_" + MARK + ".bw"
+    params:
+        effective_genome_size = GENOME_SIZE,
+        bin_size = BIN_SIZE,
+        norm_method = NORM_METHOD,
+        threads = THREADS,
+        mark = MARK
+    threads: THREADS
+    run:
+        shell("bamCoverage -b {input.cutntag_bam} \
+        -o {output.bw} \
+        --effectiveGenomeSize {params.effective_genome_size} \
+        -bs {params.bin_size} \
+        -p {params.threads} \
+        --normalizeUsing {params.norm_method}")
+
+rule make_bed_for_quantif:
+    input:
+        metadata = METADATA
+    output:
+        bed_for_quantif = OUT_DIR + "bed/" + MARK + "/bed_for_quantification_of_tss_regions.bed.saf"
+    params:
+        offset_quantif = OFFSET_QUANTIF,
+        mark = MARK,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/make_bed_to_quantify_TSS_regions.R --metadata {input.metadata} \
+        --offset_quantif {params.offset_quantif} \
+        --mark {params.mark} \
+        --out_dir {params.out_dir}")
+
+rule quantify_tss_regions:
+    input:
+        quantif_bam = expand(QUANTIF_BAM_DIR + "{sample_ID}/{sample_ID}.bam", sample_ID = SAMPLE_ID),
+        quantif_bam_bai = expand(QUANTIF_BAM_DIR + "{sample_ID}/{sample_ID}.bam.bai", sample_ID = SAMPLE_ID),
+        bed_for_quantif = OUT_DIR + "bed/" + MARK + "/bed_for_quantification_of_tss_regions.bed.saf"
+    output:
+        quantif_tss = OUT_DIR + "featureCounts/" + MARK + "/quantif_tss_regions.txt"
+    params:
+        quantif_bams = quantif_bams,
+        threads = THREADS,
+        mark = MARK,
+        out_dir = OUT_DIR
+    threads: THREADS
+    run:
+        shell("featureCounts -T {params.threads} \
+        -a {input.bed_for_quantif} \
+        -F SAF \
+        -o {output.quantif_tss} \
+        {params.quantif_bams}")
+    
+rule make_bed_for_labelling_regions:
+    input:
+        metadata = METADATA,
+        quantif_tss = OUT_DIR + "featureCounts/" + MARK + "/quantif_tss_regions.txt",
+        n_reads = N_READS
+    output:
+        bed_expression = expand(OUT_DIR + "bed/" + MARK + "/{sample_ID}_expressed_and_TSS_regions.bed", sample_ID = SAMPLE_ID),
+        bed_no_expression = expand(OUT_DIR + "bed/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions.bed", sample_ID = SAMPLE_ID),
+        bed_expression_signal = expand(OUT_DIR + "bed/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_for_scoring_signal.bed.saf", sample_ID = SAMPLE_ID),
+        bed_expression_noise = expand(OUT_DIR + "bed/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_for_scoring_noise.bed.saf", sample_ID = SAMPLE_ID),
+        bed_no_expression_signal = expand(OUT_DIR + "bed/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_for_scoring_signal.bed.saf", sample_ID = SAMPLE_ID),
+        bed_no_expression_noise = expand(OUT_DIR + "bed/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_for_scoring_noise.bed.saf", sample_ID = SAMPLE_ID)
+    params:
+        offset_plot = OFFSET_TSS_PLOT,
+        offset_signal = OFFSET_TSS_SIGNAL,
+        offset_noise = OFFSET_TSS_NOISE,
+        threshold = THRESHOLD_EXPRESSION,
+        mark = MARK,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/make_bed_for_labelling_regions.R --metadata {input.metadata} \
+        --quantif {input.quantif_tss} \
+        --n_reads {input.n_reads} \
+        --offset_plot {params.offset_plot} \
+        --offset_signal {params.offset_signal} \
+        --offset_noise {params.offset_noise} \
+        --threshold {params.threshold} \
+        --mark {params.mark} \
+        --out_dir {params.out_dir}")
+
+rule compute_deeptools_matrices:
+    input:
+        bw = OUT_DIR + "bw/" + MARK + "/{sample_ID}_" + MARK + ".bw",
+        bed_expression = OUT_DIR + "bed/" + MARK + "/{sample_ID}_expressed_and_TSS_regions.bed",
+        bed_no_expression = OUT_DIR + "bed/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions.bed"        
+    output:
+        matrix_expression = OUT_DIR + "deeptools_matrices/" + MARK + "/matrix_" + MARK + "_{sample_ID}_expressed_and_TSS_regions.gz",
+        matrix_no_expression = OUT_DIR + "deeptools_matrices/" + MARK + "/matrix_" + MARK + "_{sample_ID}_not_expressed_and_TSS_regions.gz"
+    params:
+        distance = 2000,
+        mark = MARK
+    run:
+        shell("computeMatrix scale-regions -S {input.bw} \
+        -R {input.bed_expression} \
+        -m {params.distance} \
+        -o {output.matrix_expression}")
+        shell("computeMatrix scale-regions -S {input.bw} \
+        -R {input.bed_no_expression} \
+        -m {params.distance} \
+        -o {output.matrix_no_expression}")
+
+rule get_read_depth:
+    input:
+        cutntag_bam = CUTNTAG_BAM_DIR + MARK + "/{sample_ID}_" + MARK + ".sorted.bam",
+        cutntag_bam_bai = CUTNTAG_BAM_DIR + MARK + "/{sample_ID}_" + MARK + ".sorted.bam.bai",
+        bed_expression_signal = OUT_DIR + "bed/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_for_scoring_signal.bed.saf",
+        bed_expression_noise = OUT_DIR + "bed/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_for_scoring_noise.bed.saf",
+        bed_no_expression_signal = OUT_DIR + "bed/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_for_scoring_signal.bed.saf",
+        bed_no_expression_noise = OUT_DIR + "bed/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_for_scoring_noise.bed.saf"
+    output:
+        read_counts_expression_signal = OUT_DIR + "featureCounts/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_signal.txt",
+        read_counts_expression_noise = OUT_DIR + "featureCounts/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_noise.txt",
+        read_counts_no_expression_signal = OUT_DIR + "featureCounts/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_signal.txt",
+        read_counts_no_expression_noise = OUT_DIR + "featureCounts/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_noise.txt"
+        #enrichment_score_expression = OUT_DIR + "enrichment_score/" + MARK + "/{sample_ID}_expressed_and_TSS_regions_enrichment_score.tsv",
+        #enrichment_score_no_expression = OUT_DIR + "enrichment_score/" + MARK + "/{sample_ID}_not_expressed_and_TSS_regions_enrichment_score.tsv"
+    params:
+        threads = THREADS
+    threads: THREADS
+    run:
+        shell("featureCounts -T {params.threads} \
+        -a {input.bed_expression_signal} \
+        -F SAF \
+        -o {output.read_counts_expression_signal} \
+        {input.cutntag_bam}")
+        shell("featureCounts -T {params.threads} \
+        -a {input.bed_expression_noise} \
+        -F SAF \
+        -o {output.read_counts_expression_noise} \
+        {input.cutntag_bam}")
+        shell("featureCounts -T {params.threads} \
+        -a {input.bed_no_expression_signal} \
+        -F SAF \
+        -o {output.read_counts_no_expression_signal} \
+        {input.cutntag_bam}")
+        shell("featureCounts -T {params.threads} \
+        -a {input.bed_no_expression_noise} \
+        -F SAF \
+        -o {output.read_counts_no_expression_noise} \
+        {input.cutntag_bam}")
+
+
+rule plot_tss_enrichment:
+    input:
+        matrix_expression = expand(OUT_DIR + "deeptools_matrices/" + MARK + "/matrix_" + MARK + "_{sample_ID}_expressed_and_TSS_regions.gz", sample_ID = SAMPLE_ID),
+        matrix_no_expression = expand(OUT_DIR + "deeptools_matrices/" + MARK + "/matrix_" + MARK + "_{sample_ID}_not_expressed_and_TSS_regions.gz", sample_ID = SAMPLE_ID)
+    output:
+        plot = OUT_DIR + "plots/" + MARK + "/tss_enrichment.pdf"
+    params:
+        matrices_dir = OUT_DIR + "deeptools_matrices/" + MARK + "/",
+        mark = MARK,
+        out_dir = OUT_DIR
+    run:
+        shell("Rscript scripts/plot_tss_enrichment.R --matrices_dir {params.matrices_dir} \
+        --mark {params.mark} \
+        --out_dir {params.out_dir}")

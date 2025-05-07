@@ -1,0 +1,4 @@
+/mnt/beegfs/scratch/h_herrmann/fastq/test/D821T58_trimmed.R1.fastq.gz
+/mnt/beegfs/scratch/h_herrmann/fastq/test/D821T58_trimmed.R2.fastq.gz
+/mnt/beegfs/scratch/h_herrmann/fastq/test/D821T62_trimmed.R1.fastq.gz
+/mnt/beegfs/scratch/h_herrmann/fastq/test/D821T62_trimmed.R2.fastq.gz

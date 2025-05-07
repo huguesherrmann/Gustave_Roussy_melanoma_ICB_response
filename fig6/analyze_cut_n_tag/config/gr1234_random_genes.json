@@ -1,0 +1,17 @@
+{
+  "quantif_bam_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/star/cut_n_tag/bam/",
+  "cutntag_bam_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_cut_n_tag/gr1234/bam/",
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_cut_n_tag/gr1234/",
+  "metadata": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/analyze_cut_n_tag/gr1234/metadata/metadata_regions.tsv",
+  "n_reads": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_alignment_metrics/gr1234/n_reads/n_lines_fastq.txt",
+  "threads": 4,
+  "bin_size": 50,
+  "norm_method": "CPM",
+  "sample_ID": ["D437T73", "D1332T43", "D1332T35", "D1332T46", "D437T81"],
+  "mark": "random_genes",
+  "offset_tss_plot": 5000,
+  "offset_tss_signal": 2000,
+  "offset_tss_noise": 100,
+  "offset_quantif": 1000,
+  "threshold_expression": 2,
+}

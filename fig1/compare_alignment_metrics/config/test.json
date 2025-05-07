@@ -1,0 +1,12 @@
+{
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/test/",
+  "star_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/STAR_index_hg38v24",
+  "fof_nr": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response/compare_sequencing_depth/fof/test.txt",
+  "n_reads": 1,
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_sequencing_depth/test/",
+  "cohort": "testx",
+  "r1_suffix": "_trimmed.R1.fastq.gz",
+  "r2_suffix": "_trimmed.R2.fastq.gz",
+  "threads": 1,
+  "sample_ID": ["D821T58",  "D821T62"]
+}

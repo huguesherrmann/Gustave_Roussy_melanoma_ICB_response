@@ -1,0 +1,115 @@
+"""
+@modified: 29/10/24
+@main_dev: Hugues Herrmann
+Sample reads, quantify repeated elements with Salmon and aggregate to table.
+"""
+shell.executable('bash')
+
+
+### ========== Variables ========== ###
+# Config variables
+SAMPLE_ID = config["sample_ID"]
+R1_SUFFIX = config["r1_suffix"]
+R2_SUFFIX = config["r2_suffix"]
+FASTQ_DIR = config["fastq_dir"]
+N_READ_SAMPLED_LIST = config["n_read_sampled"]
+OUT_DIR = config["out_dir"]
+SEED = config["seed"] if "seed" in config else 1234
+THREADS = config["threads"] if "threads" in config else 2
+SALMON_INDEX = config["salmon_index"]
+REDISCOVERTE_ANNOTATION = config["rediscoverte_annotation"]
+
+# Software
+SEQTK = "/mnt/beegfs/userdata/h_herrmann/.environment_conda/seqtk/bin/seqtk"
+SALMON = "/mnt/beegfs/userdata/h_herrmann/tools_software/salmon-1.8.0_linux_x86_64/bin/salmon"
+
+
+### ========== Rules ========== ###
+rule all :
+    input :
+        all_repetitive_elements = OUT_DIR + "quant/RE_all_2_counts_normalized.RDS",
+        exon_repetitive_elements = OUT_DIR + "quant/RE_exon_2_counts_normalized.RDS",
+        intron_repetitive_elements = OUT_DIR + "quant/RE_intron_2_counts_normalized.RDS",
+        intergenic_repetitive_elements = OUT_DIR + "quant/RE_intergenic_2_counts_normalized.RDS"
+
+
+rule sample_reads:
+    input:
+        r1 = expand("{fastq_dir}{sample_ID}{r1_suffix}", fastq_dir = FASTQ_DIR, sample_ID = SAMPLE_ID, r1_suffix = R1_SUFFIX),
+        r2 = expand("{fastq_dir}{sample_ID}{r2_suffix}", fastq_dir = FASTQ_DIR, sample_ID = SAMPLE_ID, r2_suffix = R2_SUFFIX)
+    output:
+        r1_sampled = expand(OUT_DIR + "sampled_reads/sample_{n_read_sampled}/sampled_{sample_ID}_R1.fastq.gz", n_read_sampled = N_READ_SAMPLED_LIST, sample_ID = SAMPLE_ID),
+        r2_sampled = expand(OUT_DIR + "sampled_reads/sample_{n_read_sampled}/sampled_{sample_ID}_R2.fastq.gz", n_read_sampled = N_READ_SAMPLED_LIST, sample_ID = SAMPLE_ID)
+    params:
+        seed = SEED
+    run:
+        for n_read_sampled in N_READ_SAMPLED_LIST:
+            for sample in SAMPLE_ID:
+                shell("{seqtk} sample -s {seed} {r1} {n_read_sampled} > {r1_sampled}".format(seqtk = SEQTK, seed = params.seed, r1 = FASTQ_DIR + sample + R1_SUFFIX, n_read_sampled = n_read_sampled, r1_sampled = OUT_DIR + "sampled_reads/sample_" + str(n_read_sampled) + "/" + "sampled_" + sample + "_R1.fastq"))
+                shell("{seqtk} sample -s {seed} {r2} {n_read_sampled} > {r2_sampled}".format(seqtk = SEQTK, seed = params.seed, r2 = FASTQ_DIR + sample + R1_SUFFIX, n_read_sampled = n_read_sampled, r2_sampled = OUT_DIR + "sampled_reads/sample_" + str(n_read_sampled) + "/" + "sampled_" + sample + "_R2.fastq"))
+                shell("gzip -1 {r1_sampled}".format(r1_sampled = OUT_DIR + "sampled_reads/sample_" + str(n_read_sampled) + "/sampled_" + sample + "_R1.fastq"))
+                shell("gzip -1 {r2_sampled}".format(r2_sampled = OUT_DIR + "sampled_reads/sample_" + str(n_read_sampled) + "/sampled_" + sample + "_R2.fastq"))
+
+rule salmon_quant:
+    input:
+        r1_sampled = OUT_DIR + "sampled_reads/sample_{n_read_sampled}/sampled_{sample_ID}_R1.fastq.gz",
+        r2_sampled = OUT_DIR + "sampled_reads/sample_{n_read_sampled}/sampled_{sample_ID}_R2.fastq.gz",
+        salmon_index = SALMON_INDEX
+    output:
+        quant = OUT_DIR + "quant/sample_{n_read_sampled}/{sample_ID}/quant.sf.gz"
+    params:
+        salmon = SALMON,
+        index_dir = SALMON_INDEX,
+        results_dir = OUT_DIR + "quant/sample_{n_read_sampled}/{sample_ID}/",
+        lib_type = "A",
+        threads = THREADS
+    threads: THREADS
+    run:
+        shell("{params.salmon} quant --index {params.index_dir} \
+        --libType {params.lib_type} \
+        -1 {input.r1_sampled} \
+        -2 {input.r2_sampled} \
+        -o {params.results_dir} \
+        --validateMappings \
+        --seqBias \
+        --gcBias \
+        --threads {params.threads} \
+        --quiet")
+        shell("gzip {quant_sf}".format(quant_sf = OUT_DIR + "quant/sample_{wildcards.n_read_sampled}/{wildcards.sample_ID}/quant.sf"))
+        shell("echo -e '{sample_ID}_{n_read_sampled}\t{file_path}' >> {metadata}".format(sample_ID = wildcards.sample_ID, n_read_sampled = wildcards.n_read_sampled, file_path = OUT_DIR + "quant/sample_{wildcards.n_read_sampled}/{wildcards.sample_ID}/quant.sf.gz", metadata = OUT_DIR + "sampled_reads/sample_{wildcards.n_read_sampled}/metadata.tsv"))
+        shell("rm {json}".format(json = OUT_DIR + "quant/sample_{wildcards.n_read_sampled}/{wildcards.sample_ID}/*.json"))
+        shell("rm -r {params}".format(params = OUT_DIR + "quant/sample_{wildcards.n_read_sampled}/{wildcards.sample_ID}/libParams"))
+        shell("rm -r {logs}".format(logs = OUT_DIR + "quant/sample_{wildcards.n_read_sampled}/{wildcards.sample_ID}/logs"))
+        shell("rm -r {info}".format(info = OUT_DIR + "quant/sample_{wildcards.n_read_sampled}/{wildcards.sample_ID}/aux_info"))
+
+
+rule annotate_repeats:
+    input:
+        quant = expand(OUT_DIR + "quant/sample_{n_read_sampled}/{sample_ID}/quant.sf.gz", n_read_sampled = N_READ_SAMPLED_LIST, sample_ID = SAMPLE_ID),
+    output:
+        all_repetitive_elements = OUT_DIR + "quant/RE_all_2_counts_normalized.RDS",    
+        exon_repetitive_elements = OUT_DIR + "quant/RE_exon_2_counts_normalized.RDS",
+        intron_repetitive_elements = OUT_DIR + "quant/RE_intron_2_counts_normalized.RDS",
+        intergenic_repetitive_elements = OUT_DIR + "quant/RE_intergenic_2_counts_normalized.RDS"
+    params:
+        annotation_dir = REDISCOVERTE_ANNOTATION,
+        out_dir = OUT_DIR + "quant/",
+        threads = THREADS
+    threads: THREADS
+    run:
+        for n_read_sampled in N_READ_SAMPLED_LIST:
+            shell("sed -i '1i sample\tquant_sf_path' {metadata}".format(metadata = OUT_DIR + "sampled_reads/sample_" + str(n_read_sampled) + "/metadata.tsv"))
+            shell("Rscript scripts/rollup.R --metadata={metadata} \
+            --datadir {annotation_dir} \
+            --nozero \
+            --assembly=hg38 \
+            --threads={threads} \
+            --outdir={out_dir}".format(metadata = OUT_DIR + "sampled_reads/sample_" + str(n_read_sampled) + "/metadata.tsv", annotation_dir = params.annotation_dir, threads = params.threads, out_dir = params.out_dir))
+
+#rule rollup:
+#    input:
+#        quant = expand(OUT_DIR + "quant/sample_{n_read_sampled}/{sample_ID}/quant.sf.gz", n_read_sampled = N_READ_SAMPLED_LIST, sample_ID = SAMPLE_ID)
+#    output:
+#        out = OUT_DIR + "out_test"
+#    run:
+#        shell("touch {output.out}")

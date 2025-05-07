@@ -1,0 +1,20 @@
+{
+  "out_dir": "/mnt/beegfs/userdata/h_herrmann/mela_ici_response_results/compare_gene_detection/hossain/",
+  "fastq_dir": "/mnt/beegfs/scratch/h_herrmann/fastq/hossain/",
+  "r1_suffix": "_1.fastq.gz",
+  "r2_suffix": "_1.fastq.gz",
+  "cohort": "Hossain",
+  "annotation": "/mnt/beegfs/userdata/h_herrmann/results_and_data/gene_level_analysis/annot_lookup.tsv",
+  "n_sample": [1000000, 5000000, 10000000, 20000000],
+  "kallisto_index": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/kallisto_index/transcriptome_Hg38v24.idx",
+  "kallisto_threads": 4,
+  "tx2gene": "/mnt/beegfs/userdata/h_herrmann/preprocess_RNAseq/annotation_genome_ref/gencode_hg38v24_annotation_tx2gene.csv",
+  "type": "single_end",
+  "length": 100,
+  "sd": 10, # Sqrt read length
+  "sample_ID": ["SRR21531009", "SRR21531010", "SRR21531011", "SRR21531012", "SRR21531013", "SRR21531014",
+"SRR21531015", "SRR21531016", "SRR21531017", "SRR21531018",
+"SRR21531019", "SRR21531020", "SRR21531021", "SRR21531022",
+"SRR21531023", "SRR21531024", "SRR21531025", "SRR21531026",
+"SRR21531027", "SRR21531028"]
+}
